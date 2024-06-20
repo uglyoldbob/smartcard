@@ -21,7 +21,7 @@ fn parse_card(card: &mut pcsc::Card) -> Result<(), ()> {
     } else {
         println!("Protocol from status: directly connected");
     }
-    println!("ATR from status: {:?}", status.atr());
+    println!("ATR from status: {:02X?}", status.atr());
 
     // Send some harmless APDU to the card.
     if let Some(_) = status.protocol2() {
@@ -74,10 +74,30 @@ fn parse_card(card: &mut pcsc::Card) -> Result<(), ()> {
     Ok(())
 }
 
+#[derive(Debug)]
+pub enum ApduResponse {
+    ClassNotSupported,
+    ResponseBytesRemaining(u8),
+    CommandNotAllowedNoCurrentEF,
+    UnknownResponse([u8;2]),
+}
+
+impl From<[u8;2]> for ApduResponse {
+    fn from(value: [u8;2]) -> Self {
+        match (value[0], value[1]) {
+            (6, _) => Self::ClassNotSupported,
+            (0x61, d) => Self::ResponseBytesRemaining(d),
+            (0x69, 0x86) => Self::CommandNotAllowedNoCurrentEF,
+            _ => Self::UnknownResponse(value),
+        }
+    }
+}
+
 #[enum_dispatch::enum_dispatch]
 pub trait ApduCommandTrait {
     fn to_vec(&self) -> Vec<u8>;
     fn provide_response(&mut self, r: Vec<u8>);
+    fn get_response(&self) -> Option<&ApduResponse>;
 }
 
 pub struct GenericApduBody {
@@ -92,7 +112,7 @@ pub struct GenericApduCommand {
     p1: u8,
     p2: u8,
     body: Option<GenericApduBody>,
-    response: Option<[u8; 2]>,
+    response: Option<ApduResponse>,
 }
 
 impl ApduCommandTrait for GenericApduCommand {
@@ -134,7 +154,11 @@ impl ApduCommandTrait for GenericApduCommand {
 
     fn provide_response(&mut self, r: Vec<u8>) {
         let a: [u8; 2] = [r[0], r[1]];
-        self.response = Some(a);
+        self.response = Some(a.into());
+    }
+
+    fn get_response(&self) -> Option<&ApduResponse> {
+        self.response.as_ref()
     }
 }
 
@@ -165,6 +189,10 @@ impl ApduCommandTrait for SelectFile {
     fn provide_response(&mut self, r: Vec<u8>) {
         self.cmd.provide_response(r);
     }
+
+    fn get_response(&self) -> Option<&ApduResponse> {
+        self.cmd.get_response()
+    }
 }
 
 #[enum_dispatch::enum_dispatch(ApduCommandTrait)]
@@ -181,6 +209,7 @@ fn sign_something(card: &mut pcsc::Card) -> Result<Vec<u8>, ()> {
     let stat = tx.transmit(&c.to_vec(), &mut rbuf);
     if let Ok(r) = stat {
         c.provide_response(r.to_vec());
+        println!("The response is {:?}", c.get_response());
     }
     println!("Status of select file is {:02x?}", stat);
 
