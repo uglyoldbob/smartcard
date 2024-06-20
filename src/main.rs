@@ -74,6 +74,121 @@ fn parse_card(card: &mut pcsc::Card) -> Result<(), ()> {
     Ok(())
 }
 
+#[enum_dispatch::enum_dispatch]
+pub trait ApduCommandTrait {
+    fn to_vec(&self) -> Vec<u8>;
+    fn provide_response(&mut self, r: Vec<u8>);
+}
+
+pub struct GenericApduBody {
+    data: Vec<u8>,
+    /// If Some, represents number of bytes expected.
+    rlen: Option<u32>,
+}
+
+pub struct GenericApduCommand {
+    cla: u8,
+    ins: u8,
+    p1: u8,
+    p2: u8,
+    body: Option<GenericApduBody>,
+    response: Option<[u8; 2]>,
+}
+
+impl ApduCommandTrait for GenericApduCommand {
+    fn to_vec(&self) -> Vec<u8> {
+        let mut a = vec![self.cla, self.ins, self.p1, self.p2];
+        if let Some(body) = &self.body {
+            let l = body.data.len() as u16;
+            if l == 0 {
+            } else if l < 256 {
+                a.push(l as u8);
+            } else {
+                a.push(0);
+                let d = l.to_le_bytes();
+                a.push(d[0]);
+                a.push(d[1]);
+            }
+            for b in &body.data {
+                a.push(*b);
+            }
+            if let Some(rlen) = body.rlen {
+                if rlen > 65536 {
+                    panic!("Invalid length data return requested");
+                }
+                if rlen <= 256 {
+                    a.push((rlen & 0xFF) as u8);
+                } else {
+                    if l <= 255 {
+                        a.push(0);
+                    }
+                    let val: u16 = (rlen & 0xFFFF) as u16;
+                    let d = val.to_le_bytes();
+                    a.push(d[0]);
+                    a.push(d[1]);
+                }
+            }
+        }
+        a
+    }
+
+    fn provide_response(&mut self, r: Vec<u8>) {
+        let a: [u8; 2] = [r[0], r[1]];
+        self.response = Some(a);
+    }
+}
+
+pub struct SelectFile {
+    cmd: GenericApduCommand,
+}
+
+impl SelectFile {
+    pub fn new() -> Self {
+        Self {
+            cmd: GenericApduCommand {
+                cla: 0,
+                ins: 0x4a,
+                p1: 0,
+                p2: 0,
+                body: None,
+                response: None,
+            },
+        }
+    }
+}
+
+impl ApduCommandTrait for SelectFile {
+    fn to_vec(&self) -> Vec<u8> {
+        self.cmd.to_vec()
+    }
+
+    fn provide_response(&mut self, r: Vec<u8>) {
+        self.cmd.provide_response(r);
+    }
+}
+
+#[enum_dispatch::enum_dispatch(ApduCommandTrait)]
+pub enum ApduCommand {
+    SelectFile(SelectFile),
+    Generic(GenericApduCommand),
+}
+
+fn sign_something(card: &mut pcsc::Card) -> Result<Vec<u8>, ()> {
+    let tx = card.transaction().map_err(|_| ())?;
+
+    let mut c = ApduCommand::SelectFile(SelectFile::new());
+    let mut rbuf: [u8; 256] = [0; 256];
+    let stat = tx.transmit(&c.to_vec(), &mut rbuf);
+    if let Ok(r) = stat {
+        c.provide_response(r.to_vec());
+    }
+    println!("Status of select file is {:02x?}", stat);
+
+    tx.end(pcsc::Disposition::LeaveCard)
+        .map_err(|(_, _err)| ())?;
+    Err(())
+}
+
 fn main() {
     // Get a context.
     let ctx = pcsc::Context::establish(pcsc::Scope::User).expect("failed to establish context");
@@ -96,6 +211,7 @@ fn main() {
         let mut card = card.unwrap();
 
         parse_card(&mut card);
+        sign_something(&mut card);
     }
 
     ctx.release()
