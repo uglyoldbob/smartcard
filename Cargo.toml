@@ -16,6 +16,5 @@ name = "initialize"
 path = "src/init.rs"
 
 [dependencies]
-enum_dispatch = "0.3.13"
 omnom = "3.0.0"
 pcsc = "2.8.2"

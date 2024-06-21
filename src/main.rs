@@ -116,7 +116,7 @@ fn sign_something(card: &mut pcsc::Card) -> Result<Vec<u8>, ()> {
         ],
     ];
     for (i, aid) in aids.iter().enumerate() {
-        let mut c = ApduCommand::SelectFile(SelectFile::new_aid(aid.to_owned()));
+        let mut c = card::ApduCommand::new_select_aid(aid.to_owned());
         let mut rbuf: [u8; 256] = [0; 256];
         println!("Command {} is {:02X?}", i, c.to_vec());
         let stat = tx.transmit(&c.to_vec(), &mut rbuf);
@@ -127,7 +127,6 @@ fn sign_something(card: &mut pcsc::Card) -> Result<Vec<u8>, ()> {
         }
         println!("Status of select file is {:02x?}", stat);
     }
-    let d = vec![0xA0, 0x00, 0x00, 0x03, 0x08, 0x00, 0x00, 0x10, 0x00];
 
     tx.end(pcsc::Disposition::LeaveCard)
         .map_err(|(_, _err)| ())?;
