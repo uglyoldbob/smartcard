@@ -23,6 +23,17 @@ fn parse_card(card: &mut pcsc::Card) -> Result<(), ()> {
     }
     println!("ATR from status: {:02X?}", status.atr());
 
+    let atr: Atr = status.atr().into();
+
+    println!("ATR from status IS {:02X?}", atr);
+    if let Some(hist) = &atr.historical {
+        let hist: &[u8] = hist;
+        if let Ok(h) = hist.try_into() {
+            let h: Historical = h;
+            println!("historical data is {:02X?}", h);
+        }
+    }
+
     // Send some harmless APDU to the card.
     if let Some(_) = status.protocol2() {
         let apdu = b"\x00\xa4\x04\x00\x08\x31\x54\x49\x43\x2e\x49\x43\x41";
@@ -36,9 +47,19 @@ fn parse_card(card: &mut pcsc::Card) -> Result<(), ()> {
     // Get the card's ATR.
     let mut atr_buf = [0; pcsc::MAX_ATR_SIZE];
     if let Ok(atr) = tx.get_attribute(pcsc::Attribute::AtrString, &mut atr_buf) {
-        println!("ATR from attribute: {:?}", atr);
+        println!("ATR from attribute: {:02X?}", atr);
     } else {
         println!("Did not get ATR");
+    }
+
+    let atr: Atr = atr.into();
+    println!("ATR from attribute IS {:02X?}", atr);
+    if let Some(hist) = &atr.historical {
+        let hist: &[u8] = hist;
+        if let Ok(h) = hist.try_into() {
+            let h: Historical = h;
+            println!("historical data is {:02X?}", h);
+        }
     }
 
     // Get some attribute.
@@ -74,22 +95,52 @@ fn parse_card(card: &mut pcsc::Card) -> Result<(), ()> {
     Ok(())
 }
 
+mod atr;
+use atr::Atr;
+mod historical;
+use historical::Historical;
+
 #[derive(Debug)]
-pub enum ApduResponse {
+pub enum ApduStatus {
     ClassNotSupported,
+    CommandExecutedOk,
     ResponseBytesRemaining(u8),
     CommandNotAllowedNoCurrentEF,
-    UnknownResponse([u8;2]),
+    AppletSelectFailed,
+    UnknownResponse([u8; 2]),
 }
 
-impl From<[u8;2]> for ApduResponse {
-    fn from(value: [u8;2]) -> Self {
+impl From<[u8; 2]> for ApduStatus {
+    fn from(value: [u8; 2]) -> Self {
         match (value[0], value[1]) {
             (6, _) => Self::ClassNotSupported,
             (0x61, d) => Self::ResponseBytesRemaining(d),
             (0x69, 0x86) => Self::CommandNotAllowedNoCurrentEF,
+            (0x69, 0x99) => Self::AppletSelectFailed,
+            (0x90, 0x00) => Self::CommandExecutedOk,
             _ => Self::UnknownResponse(value),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct ApduResponse {
+    data: Option<Vec<u8>>,
+    status: ApduStatus,
+}
+
+impl From<&[u8]> for ApduResponse {
+    fn from(value: &[u8]) -> Self {
+        let v = value.len() - 2;
+        let a: [u8; 2] = [value[v], value[v + 1]];
+        let status = a.into();
+        let data = if v > 0 {
+            let d = value[0..v].to_vec();
+            Some(d)
+        } else {
+            None
+        };
+        Self { data, status }
     }
 }
 
@@ -100,12 +151,14 @@ pub trait ApduCommandTrait {
     fn get_response(&self) -> Option<&ApduResponse>;
 }
 
+#[derive(Debug)]
 pub struct GenericApduBody {
     data: Vec<u8>,
     /// If Some, represents number of bytes expected.
     rlen: Option<u32>,
 }
 
+#[derive(Debug)]
 pub struct GenericApduCommand {
     cla: u8,
     ins: u8,
@@ -153,7 +206,7 @@ impl ApduCommandTrait for GenericApduCommand {
     }
 
     fn provide_response(&mut self, r: Vec<u8>) {
-        let a: [u8; 2] = [r[0], r[1]];
+        let a: &[u8] = &r;
         self.response = Some(a.into());
     }
 
@@ -162,19 +215,56 @@ impl ApduCommandTrait for GenericApduCommand {
     }
 }
 
+#[derive(Debug)]
 pub struct SelectFile {
     cmd: GenericApduCommand,
 }
 
 impl SelectFile {
+    pub fn new_aid(f: Vec<u8>) -> Self {
+        Self {
+            cmd: GenericApduCommand {
+                cla: 0,
+                ins: 0xa4,
+                p1: 4,
+                p2: 0,
+                body: Some(GenericApduBody {
+                    data: f,
+                    rlen: None,
+                }),
+                response: None,
+            },
+        }
+    }
+
+    pub fn new_file_id(f: Vec<u8>) -> Self {
+        Self {
+            cmd: GenericApduCommand {
+                cla: 0,
+                ins: 0xa4,
+                p1: 0,
+                p2: 0,
+                body: Some(GenericApduBody {
+                    data: f,
+                    rlen: None,
+                }),
+                response: None,
+            },
+        }
+    }
+
+    /// Does not work?
     pub fn new() -> Self {
         Self {
             cmd: GenericApduCommand {
                 cla: 0,
-                ins: 0x4a,
+                ins: 0xa4,
                 p1: 0,
                 p2: 0,
-                body: None,
+                body: Some(GenericApduBody {
+                    data: vec![0x3f, 0],
+                    rlen: None,
+                }),
                 response: None,
             },
         }
@@ -195,6 +285,7 @@ impl ApduCommandTrait for SelectFile {
     }
 }
 
+#[derive(Debug)]
 #[enum_dispatch::enum_dispatch(ApduCommandTrait)]
 pub enum ApduCommand {
     SelectFile(SelectFile),
@@ -204,14 +295,34 @@ pub enum ApduCommand {
 fn sign_something(card: &mut pcsc::Card) -> Result<Vec<u8>, ()> {
     let tx = card.transaction().map_err(|_| ())?;
 
-    let mut c = ApduCommand::SelectFile(SelectFile::new());
-    let mut rbuf: [u8; 256] = [0; 256];
-    let stat = tx.transmit(&c.to_vec(), &mut rbuf);
-    if let Ok(r) = stat {
-        c.provide_response(r.to_vec());
-        println!("The response is {:?}", c.get_response());
+    let aids = vec![
+        vec![0x31, 0x54, 0x49, 0x43, 0x2E, 0x49, 0x43, 0x41],
+        vec![0x62, 0x76, 0x01, 0xFF, 0x00, 0x00, 0x00],
+        vec![0xa0, 0x00, 0x00, 0x00, 0x01, 0x01],
+        vec![
+            0xE8, 0x2B, 0x06, 0x01, 0x04, 0x01, 0x81, 0xC3, 0x1F, 0x02, 0x01,
+        ],
+        vec![
+            0xD2, 0x33, 0x00, 0x00, 0x00, 0x45, 0x73, 0x74, 0x45, 0x49, 0x44, 0x20, 0x76, 0x33,
+            0x35,
+        ],
+        vec![
+            0xA0, 0x00, 0x00, 0x03, 0x08, 0x00, 0x00, 0x10, 0x00, 0x01, 0x00,
+        ],
+    ];
+    for (i, aid) in aids.iter().enumerate() {
+        let mut c = ApduCommand::SelectFile(SelectFile::new_aid(aid.to_owned()));
+        let mut rbuf: [u8; 256] = [0; 256];
+        println!("Command {} is {:02X?}", i, c.to_vec());
+        let stat = tx.transmit(&c.to_vec(), &mut rbuf);
+        if let Ok(r) = stat {
+            c.provide_response(r.to_vec());
+            let r = c.get_response();
+            println!("The response is {:02X?}", c.get_response());
+        }
+        println!("Status of select file is {:02x?}", stat);
     }
-    println!("Status of select file is {:02x?}", stat);
+    let d = vec![0xA0, 0x00, 0x00, 0x03, 0x08, 0x00, 0x00, 0x10, 0x00];
 
     tx.end(pcsc::Disposition::LeaveCard)
         .map_err(|(_, _err)| ())?;
