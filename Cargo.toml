@@ -3,6 +3,18 @@ name = "card"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "card"
+path = "src/lib.rs"
+
+[[bin]]
+name = "examine"
+path = "src/main.rs"
+
+[[bin]]
+name = "initialize"
+path = "src/init.rs"
+
 [dependencies]
 enum_dispatch = "0.3.13"
 omnom = "3.0.0"
