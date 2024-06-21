@@ -1,6 +1,8 @@
 pub mod atr;
 pub mod historical;
 
+use tlv_parser::tlv::{Tlv, Value};
+
 #[derive(Debug)]
 pub enum ApduStatus {
     AppletSelectFailed,
@@ -131,6 +133,67 @@ impl ApduCommand {
         }
     }
 
+    /// Run a get metadata command and return parsed results
+    pub fn get_metadata(tx: &pcsc::Transaction, slot: u8) -> Option<Metadata> {
+        let mut c = Self::new_get_metadata(slot);
+        let stat = c.run_command(&tx);
+        println!("Status of get metadata is {:02x?}", stat);
+        if let Some(s) = stat {
+            let sd = s.data.unwrap();
+            let mut tlvs = Vec::new();
+            let mut index = 0;
+
+            while index < sd.len() {
+                let tlv = Tlv::from_vec(&sd[index..]).unwrap();
+                index += tlv.len();
+                tlvs.push(tlv);
+            }
+
+            let mut meta = Metadata {
+                algorithm: None,
+                pin_policy: None,
+                touch_policy: None,
+                generated: None,
+                public: None,
+                default: None,
+                retries: None,
+            };
+
+            for tlv in tlvs {
+                println!("Tlv data parsed is {} {}", tlv.len(), tlv.to_string());
+                match tlv.tag() {
+                    1 => {
+                        meta.algorithm = Some(tlv.val().to_vec()[0].into());
+                    }
+                    2 => {
+                        let v = tlv.val().to_vec();
+                        meta.pin_policy = Some(v[0].into());
+                        meta.touch_policy = Some(v[1].into());
+                    }
+                    3 => {
+                        let v = tlv.val().to_vec()[0];
+                        meta.generated = Some(v == 1);
+                    }
+                    4 => {
+                        meta.public = Some(tlv.val().to_vec());
+                    }
+                    5 => {
+                        let v = tlv.val().to_vec()[0];
+                        meta.default = Some(v == 1);
+                    }
+                    6 => {
+                        let v = tlv.val().to_vec();
+                        meta.retries = Some((v[0], v[1]));
+                    }
+                    _ => {}
+                }
+            }
+            Some(meta)
+        } else {
+            None
+        }
+    }
+
     /// Get metadata command
     pub fn new_get_metadata(slot: u8) -> Self {
         Self {
@@ -253,8 +316,10 @@ pub enum ManagementKeyTouchPoliicy {
     Cached = 0xfd,
 }
 
+#[derive(Clone, Debug)]
 #[repr(u8)]
 pub enum AuthenticateAlgorithm {
+    TripleDes = 3,
     Rsa1024 = 6,
     Rsa2048 = 7,
     Aes128 = 8,
@@ -264,16 +329,73 @@ pub enum AuthenticateAlgorithm {
     EccP384 = 14,
 }
 
+impl From<u8> for AuthenticateAlgorithm {
+    fn from(value: u8) -> Self {
+        match value {
+            3 => Self::TripleDes,
+            6 => Self::Rsa1024,
+            7 => Self::Rsa2048,
+            8 => Self::Aes128,
+            10 => Self::Aes192,
+            11 => Self::EccP256,
+            12 => Self::Aes256,
+            14 => Self::EccP384,
+            _ => panic!("Invalid algorithm"),
+        }
+    }
+}
+
+#[derive(Debug)]
 #[repr(u8)]
 pub enum KeypairPinPolicy {
+    Default = 0,
     Never = 1,
     Once = 2,
     Always = 3,
 }
 
+impl From<u8> for KeypairPinPolicy {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => Self::Default,
+            1 => Self::Never,
+            2 => Self::Once,
+            3 => Self::Always,
+            _ => panic!("Invalid"),
+        }
+    }
+}
+
+#[derive(Debug)]
 #[repr(u8)]
 pub enum KeypairTouchPolicy {
+    Default = 0,
     Never = 1,
     Always = 2,
     Cached = 3,
+}
+
+impl From<u8> for KeypairTouchPolicy {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => Self::Default,
+            1 => Self::Never,
+            2 => Self::Always,
+            3 => Self::Cached,
+            _ => panic!("Invalid"),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Metadata {
+    pub algorithm: Option<AuthenticateAlgorithm>,
+    pub pin_policy: Option<KeypairPinPolicy>,
+    pub touch_policy: Option<KeypairTouchPolicy>,
+    /// Is it generated, otherwise it is imported
+    pub generated: Option<bool>,
+    pub public: Option<Vec<u8>>,
+    pub default: Option<bool>,
+    /// retry count and remaining count
+    pub retries: Option<(u8, u8)>,
 }

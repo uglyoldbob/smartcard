@@ -1,4 +1,5 @@
 use card::{ApduResponse, ApduStatus};
+use tlv_parser::tlv::{Tlv, Value};
 
 fn main() {
     let ctx = pcsc::Context::establish(pcsc::Scope::User).expect("failed to establish context");
@@ -40,25 +41,25 @@ fn main() {
         }
 
         {
-            let mut c = card::ApduCommand::new_get_metadata(0x9b);
-            let stat = c.run_command(&tx);
-            println!("Status of get metadata is {:02x?}", stat);
-            if let Some(s) = stat {
-                println!("Need to parse tlv: {:02X?}", s.data);
-            }
+            let md = card::ApduCommand::get_metadata(&tx, 0x9b).unwrap();
+            println!("Metadata is {:02x?}", md);
 
             let mut c = card::ApduCommand::new_authenticate_management1(
-                card::AuthenticateAlgorithm::Rsa2048,
+                md.algorithm
+                    .clone()
+                    .unwrap_or_else(|| card::AuthenticateAlgorithm::Rsa2048),
                 false,
             );
-            let stat = c.run_command(&tx);
+            let stat = c.run_command(&tx).unwrap();
             println!("Status of authenticate1 is {:02x?}", stat);
-
-            if let Some(ApduStatus::IncorrectParameter) = stat.map(|s| s.status) {
+            if let ApduStatus::CommandExecutedOk = stat.status {
+                println!("Need to finish authentication now");
+            } else if let ApduStatus::IncorrectParameter = stat.status {
                 println!("Need to initialize management key?");
                 let mut c = card::ApduCommand::new_set_management_key(
                     card::ManagementKeyTouchPoliicy::Touch,
-                    card::AuthenticateAlgorithm::Rsa2048,
+                    md.algorithm
+                        .unwrap_or_else(|| card::AuthenticateAlgorithm::Rsa2048),
                     [42; 24],
                 );
                 let stat = c.run_command(&tx);
