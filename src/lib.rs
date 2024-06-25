@@ -10,6 +10,7 @@ pub enum ApduStatus {
     ClassNotSupported,
     CommandExecutedOk,
     CommandNotAllowedNoCurrentEF,
+    FuctionNotSupported,
     IncorrectParameter,
     ResponseBytesRemaining(u8),
     SecurityFailed,
@@ -25,6 +26,7 @@ impl From<[u8; 2]> for ApduStatus {
             (0x69, 0x86) => Self::CommandNotAllowedNoCurrentEF,
             (0x69, 0x99) => Self::AppletSelectFailed,
             (0x6a, 0x80 | 0x86) => Self::IncorrectParameter,
+            (0x6a, 0x81) => Self::FuctionNotSupported,
             (0x90, 0x00) => Self::CommandExecutedOk,
             _ => Self::UnknownResponse(value),
         }
@@ -51,6 +53,52 @@ impl ApduResponse {
                 }
             })
             .flatten()
+    }
+
+    /// Get the full response, issuing additional read commands if necessary
+    pub fn get_full_response(&mut self, tx: &pcsc::Transaction) {
+        let mut r = Vec::new();
+        if let Some(d) = &self.data {
+            r.append(&mut d.clone());
+        }
+        while let ApduStatus::ResponseBytesRemaining(d) = self.status {
+            let mut c = ApduCommand::new_get_response(d);
+            *self = c.run_command(tx).unwrap();
+            if let Some(d) = &self.data {
+                r.append(&mut d.clone());
+            }
+        }
+        self.data = Some(r);
+    }
+
+    /// Process generate asymmetric key response, required to call get_full_response first
+    pub fn parse_asymmetric_key_response(
+        &self,
+        algorithm: AuthenticateAlgorithm,
+    ) -> Option<AsymmetricKey> {
+        let d = self.data.as_ref().unwrap();
+        match algorithm {
+            AuthenticateAlgorithm::TripleDes => todo!(),
+            AuthenticateAlgorithm::Rsa1024 => todo!(),
+            AuthenticateAlgorithm::Rsa2048 => {
+                let tlv = Tlv::from_vec(&d[0..]).unwrap();
+                println!("Tlv for asymmetric is {}", tlv);
+                if let tlv_parser::tlv::Value::TlvList(tlvs) = tlv.val() {
+                    let rsa = AsymmetricRsaKey {
+                        modulus: tlvs[0].val().to_vec(),
+                        exponent: tlvs[1].val().to_vec(),
+                    };
+                    return Some(AsymmetricKey::RsaKey(rsa));
+                } else {
+                    return None;
+                }
+            }
+            AuthenticateAlgorithm::Aes128 => todo!(),
+            AuthenticateAlgorithm::Aes192 => todo!(),
+            AuthenticateAlgorithm::EccP256 => todo!(),
+            AuthenticateAlgorithm::Aes256 => todo!(),
+            AuthenticateAlgorithm::EccP384 => todo!(),
+        }
     }
 }
 
@@ -130,9 +178,24 @@ impl ApduCommand {
         }
     }
 
+    /// Create a new get response command
+    pub fn new_get_response(d: u8) -> Self {
+        Self {
+            cla: 0,
+            ins: 0xc0,
+            p1: 0,
+            p2: 0,
+            body: Some(ApduBody {
+                data: Vec::new(),
+                rlen: Some(d as u32),
+            }),
+            response: None,
+        }
+    }
+
     /// Set the management key
     pub fn new_set_management_key(
-        touch_policy: ManagementKeyTouchPoliicy,
+        touch_policy: ManagementKeyTouchPolicy,
         algorithm: AuthenticateAlgorithm,
         key: [u8; 24],
     ) -> Self {
@@ -156,7 +219,7 @@ impl ApduCommand {
         let mut c = Self::new_get_metadata(slot);
         let stat = c.run_command(&tx);
         println!("Status of get metadata is {:02x?}", stat);
-        if let Some(s) = stat {
+        if let Ok(s) = stat {
             let sd = s.data.unwrap();
             let mut tlvs = Vec::new();
             let mut index = 0;
@@ -283,7 +346,7 @@ impl ApduCommand {
     ///
     pub fn new_generate_asymmetric_key_pair(
         slot: u8,
-        algorithm: u8,
+        algorithm: AuthenticateAlgorithm,
         pin_policy: KeypairPinPolicy,
         touch_policy: KeypairTouchPolicy,
     ) -> Self {
@@ -298,7 +361,7 @@ impl ApduCommand {
                     9,
                     0x80,
                     0x01,
-                    algorithm,
+                    algorithm as u8,
                     0xaa,
                     0x01,
                     pin_policy as u8,
@@ -357,16 +420,16 @@ impl ApduCommand {
         self.response.as_ref()
     }
 
-    pub fn run_command(&mut self, tx: &pcsc::Transaction) -> Option<ApduResponse> {
+    pub fn run_command(&mut self, tx: &pcsc::Transaction) -> Result<ApduResponse, pcsc::Error> {
         println!("Command is {:02X?}", self.to_vec());
-        let mut rbuf: [u8; 256] = [0; 256];
+        let mut rbuf: [u8; 2048] = [0; 2048];
         let stat = tx.transmit(&self.to_vec(), &mut rbuf);
-        stat.ok().map(|s| s.into())
+        stat.map(|s| s.into())
     }
 }
 
 #[repr(u8)]
-pub enum ManagementKeyTouchPoliicy {
+pub enum ManagementKeyTouchPolicy {
     NoTouch = 0xff,
     Touch = 0xfe,
     Cached = 0xfd,
@@ -454,4 +517,15 @@ pub struct Metadata {
     pub default: Option<bool>,
     /// retry count and remaining count
     pub retries: Option<(u8, u8)>,
+}
+
+#[derive(Debug)]
+pub struct AsymmetricRsaKey {
+    modulus: Vec<u8>,
+    exponent: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub enum AsymmetricKey {
+    RsaKey(AsymmetricRsaKey),
 }

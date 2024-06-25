@@ -16,7 +16,6 @@ fn main() {
         let mut card = card.unwrap();
 
         let tx = card.transaction().map_err(|_| ()).unwrap();
-        let mut rbuf: [u8; 256] = [0; 256];
 
         let aids = vec![
             vec![0x31, 0x54, 0x49, 0x43, 0x2E, 0x49, 0x43, 0x41],
@@ -72,7 +71,7 @@ fn main() {
             } else if let ApduStatus::IncorrectParameter = stat.status {
                 println!("Need to initialize management key?");
                 let mut c = card::ApduCommand::new_set_management_key(
-                    card::ManagementKeyTouchPoliicy::Touch,
+                    card::ManagementKeyTouchPolicy::NoTouch,
                     md.algorithm
                         .unwrap_or_else(|| card::AuthenticateAlgorithm::Rsa2048),
                     [42; 24],
@@ -84,18 +83,19 @@ fn main() {
 
         let mut c = card::ApduCommand::new_generate_asymmetric_key_pair(
             0x9a,
-            7,
+            card::AuthenticateAlgorithm::Rsa2048,
             card::KeypairPinPolicy::Always,
-            card::KeypairTouchPolicy::Always,
+            card::KeypairTouchPolicy::Never,
         );
-        println!("Command is {:02X?}", c.to_vec());
-        let stat = tx.transmit(&c.to_vec(), &mut rbuf);
-        if let Ok(r) = stat {
-            c.provide_response(r.to_vec());
-            let r = c.get_response();
-            println!("The response of generate key is {:02X?}", r);
+        let stat = c.run_command(&tx);
+        if let Ok(mut r) = stat {
+            r.get_full_response(&tx);
+            println!("The response of generate key is {:02X?}", r.status);
+            let d = r.data.as_ref().unwrap();
+            println!("The full data is {} bytes {:02X?}", d.len(), d);
+            let key = r.parse_asymmetric_key_response(card::AuthenticateAlgorithm::Rsa2048);
+            println!("The key is {:02X?}", key);
         }
-        println!("Status of generate key is {:02x?}", stat);
 
         tx.end(pcsc::Disposition::LeaveCard)
             .map_err(|(_, _err)| ())
