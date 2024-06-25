@@ -309,6 +309,21 @@ impl ApduCommand {
         }
     }
 
+    /// A new put data command
+    pub fn new_put_data(tag: Vec<u8>) -> Self {
+        Self {
+            cla: 0,
+            ins: 0xdb,
+            p1: 0x3f,
+            p2: 0xff,
+            body: Some(ApduBody {
+                data: tag,
+                rlen: None,
+            }),
+            response: None,
+        }
+    }
+
     /// Authenticate to the management key on the card
     pub fn new_authenticate_management1(algorithm: AuthenticateAlgorithm, mutual: bool) -> Self {
         Self {

@@ -123,6 +123,27 @@ impl<'a> PivCardReader<'a> {
         if let Ok(r) = &r {
             if let Some(d) = &r.data {
                 let tlv = Tlv::from_vec(d).unwrap();
+                if let tlv_parser::tlv::Value::Val(v) = tlv.val() {
+                    println!("Tlv of x509 cert is {:02X?}", v);
+                    return Some(v.to_owned());
+                }
+            } else {
+                println!("Total response is {:02X?}", r);
+            }
+        } else {
+            println!("Error for get x509 cert is {:?}", r.err());
+        }
+        None
+    }
+
+    /// Try to get some piv data
+    pub fn get_piv_data(&self, tag: Vec<u8>) -> Option<Vec<u8>> {
+        let tlv = Tlv::new(0x5c, tlv_parser::tlv::Value::Val(tag)).unwrap();
+        let mut c = super::ApduCommand::new_get_data(tlv.to_vec());
+        let r = c.run_command(&self.tx);
+        if let Ok(r) = &r {
+            if let Some(d) = &r.data {
+                let tlv = Tlv::from_vec(d).unwrap();
                 println!("Tlv of x509 cert is {}", tlv);
             } else {
                 println!("Total response is {:02X?}", r);
@@ -244,5 +265,25 @@ impl<'a> PivCardWriter<'a> {
             }
         }
         Ok(key.unwrap())
+    }
+
+    /// Write some data into a piv data object
+    pub fn write_piv_data(&mut self, tag: Vec<u8>, data: Vec<u8>) -> Result<(), ()> {
+        let tlv = Tlv::new(0x5c, tlv_parser::tlv::Value::Val(tag)).unwrap();
+        let tlv2 = Tlv::new(0x53, tlv_parser::tlv::Value::Val(data)).unwrap();
+        let tlv_total = tlv_parser::tlv::Value::TlvList(vec![tlv, tlv2]);
+        let mut c = super::ApduCommand::new_put_data(tlv_total.to_vec());
+        let r = c.run_command(&self.reader.tx);
+        if let Ok(r) = &r {
+            if let Some(d) = &r.data {
+                let tlv = Tlv::from_vec(d).unwrap();
+                println!("Tlv of write data is {}", tlv);
+            } else {
+                println!("Total response is {:02X?}", r);
+            }
+        } else {
+            println!("Error for write data is {:?}", r.err());
+        }
+        Err(())
     }
 }

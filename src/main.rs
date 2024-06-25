@@ -194,6 +194,9 @@ fn main() {
         reader.get_ccc();
         let cert = reader.get_x509_cert();
         println!("Cert is {:02X?}", cert);
+
+        let data = reader.get_piv_data(vec![0x5f, 0xc1, 5]);
+        println!("Data read is {:02X?}", data);
     }
 
     ctx.release()

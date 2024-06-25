@@ -18,8 +18,18 @@ fn main() {
         let mut writer = card::PivCardWriter::new(&mut card);
         writer.reader.bruteforce_aid();
 
-        //writer.erase_card();
-        let keypair =
-            writer.generate_keypair(card::Slot::Authentication, card::KeypairPinPolicy::Always);
+        let data = writer.reader.get_piv_data(vec![0x5f, 0xc1, 5]);
+        println!("Data read is {:02X?}", data);
+        match data {
+            None => {
+                //writer.erase_card();
+                let keypair = writer
+                    .generate_keypair(card::Slot::Authentication, card::KeypairPinPolicy::Always);
+                writer.write_piv_data(vec![0x5f, 0xc1, 5], vec![1, 2, 3, 4, 5]);
+            }
+            Some(d) => {
+                println!("The data read is {:02X?}", d);
+            }
+        }
     }
 }
