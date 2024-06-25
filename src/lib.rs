@@ -226,7 +226,10 @@ impl ApduCommand {
         let mut c = Self::new_get_metadata(slot);
         let stat = c.run_command(&tx);
         println!("Status of get metadata is {:02x?}", stat);
-        if let Ok(s) = stat {
+        if let Ok(mut s) = stat {
+            if let ApduStatus::ResponseBytesRemaining(_d) = s.status {
+                s.get_full_response(&tx);
+            }
             let sd = s.data.unwrap();
             let mut tlvs = Vec::new();
             let mut index = 0;
@@ -638,95 +641,5 @@ impl From<&[u8]> for CardCapabilityContainer {
     }
 }
 
-/// This struct is responsible for trying to read a piv card
-pub struct PivCardReader<'a> {
-    tx: pcsc::Transaction<'a>,
-    aid: Option<Vec<u8>>,
-    ccc: Option<CardCapabilityContainer>,
-}
-
-impl<'a> PivCardReader<'a> {
-    /// Construct a new self
-    pub fn new(card: &'a mut pcsc::Card) -> Self {
-        let tx = card
-            .transaction()
-            .expect("failed to begin card transaction");
-        Self {
-            tx,
-            aid: None,
-            ccc: None,
-        }
-    }
-
-    /// get the card capability container
-    pub fn get_ccc(&mut self) -> Result<(), ()> {
-        let mut ccc: CardCapabilityContainer = Default::default();
-        let tlv =
-            tlv_parser::tlv::Tlv::new(0x5c, tlv_parser::tlv::Value::Val(vec![0x5f, 0xc1, 0x07]))
-                .unwrap();
-        let mut c = ApduCommand::new_get_data(tlv.to_vec());
-        let r = c.run_command(&self.tx);
-        if let Ok(r) = &r {
-            if let Some(d) = &r.data {
-                let tlv = Tlv::from_vec(d).unwrap();
-                if let tlv_parser::tlv::Value::Val(v) = tlv.val() {
-                    let v: &[u8] = v;
-                    ccc = v.into();
-                }
-            }
-        }
-        println!("CCC IS {:02X?}", ccc);
-        self.ccc = Some(ccc);
-        Ok(())
-    }
-
-    /// Bruteforce the aid on the card
-    pub fn bruteforce_aid(&mut self) -> Result<(), ()> {
-        let mut aid = Vec::new();
-
-        loop {
-            let mut found = false;
-            for i in 0..=255 {
-                let mut taid = aid.clone();
-                taid.push(i as u8);
-                let mut c = ApduCommand::new_select_aid(taid.to_owned());
-                let stat = c.run_command(&self.tx);
-                if let Ok(s) = stat {
-                    if let ApduStatus::CommandExecutedOk = s.status {
-                        aid.push(i);
-                        println!("AID is {:02X?}", aid);
-                        found = true;
-                    }
-                }
-            }
-            if !found {
-                break;
-            }
-        }
-        println!("AID is {:02X?}", aid);
-
-        let mut c = ApduCommand::new_select_aid(aid.to_owned());
-        let stat = c.run_command(&self.tx).map_err(|_| ())?;
-        println!("Selecting detected aid {:02X?}", stat);
-        self.aid = Some(aid);
-        Ok(())
-    }
-
-    /// Try to get the x509 certificate
-    pub fn get_x509_cert(&self) -> Option<Vec<u8>> {
-        let tlv = Tlv::new(0x5c, tlv_parser::tlv::Value::Val(vec![0x5f, 0xc1, 0x05])).unwrap();
-        let mut c = ApduCommand::new_get_data(tlv.to_vec());
-        let r = c.run_command(&self.tx);
-        if let Ok(r) = &r {
-            if let Some(d) = &r.data {
-                let tlv = Tlv::from_vec(d).unwrap();
-                println!("Tlv of x509 cert is {}", tlv);
-            } else {
-                println!("Total response is {:02X?}", r);
-            }
-        } else {
-            println!("Error for get x509 cert is {:?}", r.err());
-        }
-        None
-    }
-}
+mod piv_card;
+pub use piv_card::*;
