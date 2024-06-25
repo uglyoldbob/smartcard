@@ -16,6 +16,7 @@ name = "initialize"
 path = "src/init.rs"
 
 [dependencies]
+des = "0.8.1"
 omnom = "3.0.0"
 pcsc = "2.8.2"
 tlv_parser = "0.9.0"

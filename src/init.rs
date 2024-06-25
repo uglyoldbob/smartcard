@@ -1,5 +1,4 @@
-use card::{ApduResponse, ApduStatus};
-use tlv_parser::tlv::{Tlv, Value};
+use card::ApduStatus;
 
 fn main() {
     let ctx = pcsc::Context::establish(pcsc::Scope::User).expect("failed to establish context");
@@ -55,7 +54,14 @@ fn main() {
             if let ApduStatus::CommandExecutedOk = stat.status {
                 let challenge = stat.process_response_authenticate_management1();
                 println!("Need to finish authentication now with {:02X?}", challenge);
-                let mut c2 = card::ApduCommand::new_authenticate_management2(algorithm, &[42; 8]);
+                let mut c2 = card::ApduCommand::new_authenticate_management2(
+                    algorithm,
+                    challenge.as_ref().unwrap(),
+                    &[
+                        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x01, 0x02, 0x03, 0x04,
+                        0x05, 0x06, 0x07, 0x08, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+                    ],
+                );
                 let stat2 = c2.run_command(&tx);
                 println!("Response of auth2 is {:02X?}", stat2);
                 if let ApduStatus::CommandExecutedOk = stat2.as_ref().unwrap().status {
@@ -87,7 +93,7 @@ fn main() {
         if let Ok(r) = stat {
             c.provide_response(r.to_vec());
             let r = c.get_response();
-            println!("The response of generate key is {:02X?}", c.get_response());
+            println!("The response of generate key is {:02X?}", r);
         }
         println!("Status of generate key is {:02x?}", stat);
 

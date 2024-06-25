@@ -1,7 +1,8 @@
 pub mod atr;
 pub mod historical;
 
-use tlv_parser::tlv::{Tlv, Value};
+use des::cipher::{generic_array::GenericArray, BlockEncrypt};
+use tlv_parser::tlv::Tlv;
 
 #[derive(Debug)]
 pub enum ApduStatus {
@@ -241,8 +242,26 @@ impl ApduCommand {
     /// Second command to authenticate to the management key on the card (non-mutual authentication)
     pub fn new_authenticate_management2(
         algorithm: AuthenticateAlgorithm,
-        response: &[u8; 8],
+        challenge: &[u8],
+        management_key: &[u8],
     ) -> Self {
+        let mut response: [u8; 8] = [0; 8];
+        match algorithm {
+            AuthenticateAlgorithm::TripleDes => {
+                use des::cipher::KeyInit;
+                let des = des::TdesEde3::new_from_slice(management_key).unwrap();
+                let mut ga = GenericArray::clone_from_slice(challenge);
+                des.encrypt_block(&mut ga);
+                response.copy_from_slice(&ga[0..8]);
+            }
+            AuthenticateAlgorithm::Rsa1024 => todo!(),
+            AuthenticateAlgorithm::Rsa2048 => todo!(),
+            AuthenticateAlgorithm::Aes128 => todo!(),
+            AuthenticateAlgorithm::Aes192 => todo!(),
+            AuthenticateAlgorithm::EccP256 => todo!(),
+            AuthenticateAlgorithm::Aes256 => todo!(),
+            AuthenticateAlgorithm::EccP384 => todo!(),
+        }
         let mut d = vec![0x7c, 0x0a, 0x82, response.len() as u8];
         d.append(&mut response.to_vec());
         Self {
