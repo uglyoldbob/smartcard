@@ -214,6 +214,20 @@ impl ApduCommand {
         }
     }
 
+    /// Get the card serial number
+    pub fn get_serial_number(tx: &pcsc::Transaction) -> Result<ApduResponse, pcsc::Error> {
+        let mut c = Self {
+            cla: 0,
+            ins: 0xF8,
+            p1: 0,
+            p2: 0,
+            body: None,
+            response: None,
+        };
+        let stat = c.run_command(tx);
+        stat
+    }
+
     /// Run a get metadata command and return parsed results
     pub fn get_metadata(tx: &pcsc::Transaction, slot: u8) -> Option<Metadata> {
         let mut c = Self::new_get_metadata(slot);
@@ -287,6 +301,18 @@ impl ApduCommand {
         }
     }
 
+    /// Erase the card!
+    pub fn new_erase_card() -> Self {
+        Self {
+            cla: 0,
+            ins: 0xfb,
+            p1: 0,
+            p2: 0,
+            body: None,
+            response: None,
+        }
+    }
+
     /// Authenticate to the management key on the card
     pub fn new_authenticate_management1(algorithm: AuthenticateAlgorithm, mutual: bool) -> Self {
         Self {
@@ -341,6 +367,7 @@ impl ApduCommand {
     }
 
     /// A command to generate an asymmetric key pair
+    /// The old key in the slot will be gone forever, be careful.
     /// slot: One of 0x9a, 0x9c, 0x9d, 0x9e, 0x82, 0x93, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E, 0x8F, 0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0xF9
     /// algorithm: rsa-2048(7)
     ///

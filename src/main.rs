@@ -88,6 +88,9 @@ fn parse_card(card: &mut pcsc::Card) -> Result<(), ()> {
         println!("failed to get the vendor name attribute length");
     }
 
+    let serial = card::ApduCommand::get_serial_number(&tx);
+    println!("Serial is {:02X?}", serial);
+
     // Can either end explicity, which allows error handling,
     // and setting the disposition method, or leave it to drop, which
     // swallows any error and hardcodes LeaveCard.
@@ -133,6 +136,41 @@ fn sign_something(card: &mut pcsc::Card) -> Result<Vec<u8>, ()> {
     Err(())
 }
 
+fn find_aid(card: &mut pcsc::Card) -> Result<Vec<u8>, ()> {
+    let tx = card.transaction().map_err(|_| ())?;
+
+    let mut aid = Vec::new();
+
+    loop {
+        let mut found = false;
+        for i in 0..=255 {
+            let mut taid = aid.clone();
+            taid.push(i as u8);
+            let mut c = card::ApduCommand::new_select_aid(taid.to_owned());
+            let stat = c.run_command(&tx);
+            if let Ok(s) = stat {
+                if let ApduStatus::CommandExecutedOk = s.status {
+                    aid.push(i);
+                    println!("AID is {:02X?}", aid);
+                    found = true;
+                }
+            }
+        }
+        if !found {
+            break;
+        }
+    }
+    println!("AID is {:02X?}", aid);
+
+    let mut c = card::ApduCommand::new_select_aid(aid.to_owned());
+    let stat = c.run_command(&tx).map_err(|_| ())?;
+    println!("Selecting detected aid {:02X?}", stat);
+
+    tx.end(pcsc::Disposition::LeaveCard)
+        .map_err(|(_, _err)| ())?;
+    Ok(aid)
+}
+
 fn main() {
     // Get a context.
     let ctx = pcsc::Context::establish(pcsc::Scope::User).expect("failed to establish context");
@@ -154,8 +192,7 @@ fn main() {
         }
         let mut card = card.unwrap();
 
-        parse_card(&mut card);
-        sign_something(&mut card);
+        let aid = find_aid(&mut card).unwrap();
     }
 
     ctx.release()

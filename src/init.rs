@@ -17,6 +17,12 @@ fn main() {
 
         let tx = card.transaction().map_err(|_| ()).unwrap();
 
+        if false {
+            let mut erase = card::ApduCommand::new_erase_card();
+            let erases = erase.run_command(&tx);
+            println!("Response of erase is {:02X?}", erases);
+        }
+
         let aids = vec![
             vec![0x31, 0x54, 0x49, 0x43, 0x2E, 0x49, 0x43, 0x41],
             vec![0x62, 0x76, 0x01, 0xFF, 0x00, 0x00, 0x00],
@@ -96,6 +102,9 @@ fn main() {
             let key = r.parse_asymmetric_key_response(card::AuthenticateAlgorithm::Rsa2048);
             println!("The key is {:02X?}", key);
         }
+
+        let serial = card::ApduCommand::get_serial_number(&tx);
+        println!("Serial is {:02X?}", serial);
 
         tx.end(pcsc::Disposition::LeaveCard)
             .map_err(|(_, _err)| ())
