@@ -44,16 +44,25 @@ fn main() {
             let md = card::ApduCommand::get_metadata(&tx, 0x9b).unwrap();
             println!("Metadata is {:02x?}", md);
 
-            let mut c = card::ApduCommand::new_authenticate_management1(
-                md.algorithm
-                    .clone()
-                    .unwrap_or_else(|| card::AuthenticateAlgorithm::Rsa2048),
-                false,
-            );
+            let algorithm = md
+                .algorithm
+                .clone()
+                .unwrap_or_else(|| card::AuthenticateAlgorithm::Rsa2048);
+
+            let mut c = card::ApduCommand::new_authenticate_management1(algorithm, false);
             let stat = c.run_command(&tx).unwrap();
             println!("Status of authenticate1 is {:02x?}", stat);
             if let ApduStatus::CommandExecutedOk = stat.status {
-                println!("Need to finish authentication now");
+                let challenge = stat.process_response_authenticate_management1();
+                println!("Need to finish authentication now with {:02X?}", challenge);
+                let mut c2 = card::ApduCommand::new_authenticate_management2(algorithm, &[42; 8]);
+                let stat2 = c2.run_command(&tx);
+                println!("Response of auth2 is {:02X?}", stat2);
+                if let ApduStatus::CommandExecutedOk = stat2.as_ref().unwrap().status {
+                    println!("Success auth2");
+                } else {
+                    println!("NOT success auth2");
+                }
             } else if let ApduStatus::IncorrectParameter = stat.status {
                 println!("Need to initialize management key?");
                 let mut c = card::ApduCommand::new_set_management_key(

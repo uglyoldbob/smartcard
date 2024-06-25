@@ -36,6 +36,23 @@ pub struct ApduResponse {
     pub status: ApduStatus,
 }
 
+impl ApduResponse {
+    /// Process response to authenticate management1 command
+    pub fn process_response_authenticate_management1(&self) -> Option<Vec<u8>> {
+        self.data
+            .as_ref()
+            .map(|d| {
+                if d.len() >= 4 && d[0..4] == [0x7c, 0x0a, 0x81, 0x08] {
+                    let d2 = d[4..].to_vec();
+                    Some(d2)
+                } else {
+                    None
+                }
+            })
+            .flatten()
+    }
+}
+
 impl From<&[u8]> for ApduResponse {
     fn from(value: &[u8]) -> Self {
         let v = value.len() - 2;
@@ -221,6 +238,26 @@ impl ApduCommand {
         }
     }
 
+    /// Second command to authenticate to the management key on the card (non-mutual authentication)
+    pub fn new_authenticate_management2(
+        algorithm: AuthenticateAlgorithm,
+        response: &[u8; 8],
+    ) -> Self {
+        let mut d = vec![0x7c, 0x0a, 0x82, response.len() as u8];
+        d.append(&mut response.to_vec());
+        Self {
+            cla: 0,
+            ins: 0x87,
+            p1: algorithm as u8,
+            p2: 0x9b,
+            body: Some(ApduBody {
+                data: d,
+                rlen: None,
+            }),
+            response: None,
+        }
+    }
+
     /// A command to generate an asymmetric key pair
     /// slot: One of 0x9a, 0x9c, 0x9d, 0x9e, 0x82, 0x93, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E, 0x8F, 0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0xF9
     /// algorithm: rsa-2048(7)
@@ -316,7 +353,7 @@ pub enum ManagementKeyTouchPoliicy {
     Cached = 0xfd,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 #[repr(u8)]
 pub enum AuthenticateAlgorithm {
     TripleDes = 3,
