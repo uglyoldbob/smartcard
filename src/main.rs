@@ -1,4 +1,5 @@
 use card::*;
+use tlv_parser::tlv;
 
 fn parse_card(card: &mut pcsc::Card) -> Result<(), ()> {
     // Start an exclusive transaction (not required -- can work on card directly).
@@ -91,6 +92,37 @@ fn parse_card(card: &mut pcsc::Card) -> Result<(), ()> {
     let serial = card::ApduCommand::get_serial_number(&tx);
     println!("Serial is {:02X?}", serial);
 
+    {
+        let tlv = tlv_parser::tlv::Tlv::new(0x5c, tlv_parser::tlv::Value::Val(vec![0x7e])).unwrap();
+        let mut c = card::ApduCommand::new_get_data(tlv.to_vec());
+        let r = c.run_command(&tx);
+        if let Ok(r) = &r {
+            if let Some(d) = &r.data {
+                let tlv = tlv::Tlv::from_vec(d).unwrap();
+                println!("TLV IS {}", tlv);
+            }
+        }
+        println!("Response of get data2 is {:02X?}", r);
+    }
+
+    {
+        let tlv =
+            tlv_parser::tlv::Tlv::new(0x5c, tlv_parser::tlv::Value::Val(vec![0x5f, 0xc1, 0x05]))
+                .unwrap();
+        let mut c = card::ApduCommand::new_get_data(tlv.to_vec());
+        let r = c.run_command(&tx);
+        if let Ok(r) = &r {
+            if let Some(d) = &r.data {
+                let tlv = tlv::Tlv::from_vec(d).unwrap();
+                println!("Tlv of x509 cert is {}", tlv);
+            } else {
+                println!("Total response is {:02X?}", r);
+            }
+        } else {
+            println!("Error for get x509 cert is {:?}", r.err());
+        }
+    }
+
     // Can either end explicity, which allows error handling,
     // and setting the disposition method, or leave it to drop, which
     // swallows any error and hardcodes LeaveCard.
@@ -136,41 +168,6 @@ fn sign_something(card: &mut pcsc::Card) -> Result<Vec<u8>, ()> {
     Err(())
 }
 
-fn find_aid(card: &mut pcsc::Card) -> Result<Vec<u8>, ()> {
-    let tx = card.transaction().map_err(|_| ())?;
-
-    let mut aid = Vec::new();
-
-    loop {
-        let mut found = false;
-        for i in 0..=255 {
-            let mut taid = aid.clone();
-            taid.push(i as u8);
-            let mut c = card::ApduCommand::new_select_aid(taid.to_owned());
-            let stat = c.run_command(&tx);
-            if let Ok(s) = stat {
-                if let ApduStatus::CommandExecutedOk = s.status {
-                    aid.push(i);
-                    println!("AID is {:02X?}", aid);
-                    found = true;
-                }
-            }
-        }
-        if !found {
-            break;
-        }
-    }
-    println!("AID is {:02X?}", aid);
-
-    let mut c = card::ApduCommand::new_select_aid(aid.to_owned());
-    let stat = c.run_command(&tx).map_err(|_| ())?;
-    println!("Selecting detected aid {:02X?}", stat);
-
-    tx.end(pcsc::Disposition::LeaveCard)
-        .map_err(|(_, _err)| ())?;
-    Ok(aid)
-}
-
 fn main() {
     // Get a context.
     let ctx = pcsc::Context::establish(pcsc::Scope::User).expect("failed to establish context");
@@ -192,7 +189,11 @@ fn main() {
         }
         let mut card = card.unwrap();
 
-        let aid = find_aid(&mut card).unwrap();
+        let mut reader = card::PivCardReader::new(&mut card);
+        reader.bruteforce_aid();
+        reader.get_ccc();
+        let cert = reader.get_x509_cert();
+        println!("Cert is {:02X?}", cert);
     }
 
     ctx.release()

@@ -1,7 +1,10 @@
 pub mod atr;
 pub mod historical;
 
+use std::io::Read;
+
 use des::cipher::{generic_array::GenericArray, BlockEncrypt};
+use omnom::ReadExt;
 use tlv_parser::tlv::Tlv;
 
 #[derive(Debug)]
@@ -10,6 +13,7 @@ pub enum ApduStatus {
     ClassNotSupported,
     CommandExecutedOk,
     CommandNotAllowedNoCurrentEF,
+    FileNotFound,
     FuctionNotSupported,
     IncorrectParameter,
     ResponseBytesRemaining(u8),
@@ -27,6 +31,7 @@ impl From<[u8; 2]> for ApduStatus {
             (0x69, 0x99) => Self::AppletSelectFailed,
             (0x6a, 0x80 | 0x86) => Self::IncorrectParameter,
             (0x6a, 0x81) => Self::FuctionNotSupported,
+            (0x6a, 0x82) => Self::FileNotFound,
             (0x90, 0x00) => Self::CommandExecutedOk,
             _ => Self::UnknownResponse(value),
         }
@@ -98,6 +103,8 @@ impl ApduResponse {
             AuthenticateAlgorithm::EccP256 => todo!(),
             AuthenticateAlgorithm::Aes256 => todo!(),
             AuthenticateAlgorithm::EccP384 => todo!(),
+            AuthenticateAlgorithm::CipherSuite2 => todo!(),
+            AuthenticateAlgorithm::CipherSuite7 => todo!(),
         }
     }
 }
@@ -149,35 +156,6 @@ impl ApduCommand {
         }
     }
 
-    pub fn new_select_file_id(f: Vec<u8>) -> Self {
-        Self {
-            cla: 0,
-            ins: 0xa4,
-            p1: 0,
-            p2: 0,
-            body: Some(ApduBody {
-                data: f,
-                rlen: None,
-            }),
-            response: None,
-        }
-    }
-
-    /// Does not work?
-    pub fn new_select() -> Self {
-        Self {
-            cla: 0,
-            ins: 0xa4,
-            p1: 0,
-            p2: 0,
-            body: Some(ApduBody {
-                data: vec![0x3f, 0],
-                rlen: None,
-            }),
-            response: None,
-        }
-    }
-
     /// Create a new get response command
     pub fn new_get_response(d: u8) -> Self {
         Self {
@@ -188,6 +166,21 @@ impl ApduCommand {
             body: Some(ApduBody {
                 data: Vec::new(),
                 rlen: Some(d as u32),
+            }),
+            response: None,
+        }
+    }
+
+    /// The get data command
+    pub fn new_get_data(tag: Vec<u8>) -> Self {
+        Self {
+            cla: 0,
+            ins: 0xcb,
+            p1: 0x3f,
+            p2: 0xff,
+            body: Some(ApduBody {
+                data: tag,
+                rlen: None,
             }),
             response: None,
         }
@@ -350,6 +343,8 @@ impl ApduCommand {
             AuthenticateAlgorithm::EccP256 => todo!(),
             AuthenticateAlgorithm::Aes256 => todo!(),
             AuthenticateAlgorithm::EccP384 => todo!(),
+            AuthenticateAlgorithm::CipherSuite2 => todo!(),
+            AuthenticateAlgorithm::CipherSuite7 => todo!(),
         }
         let mut d = vec![0x7c, 0x0a, 0x82, response.len() as u8];
         d.append(&mut response.to_vec());
@@ -462,6 +457,7 @@ pub enum ManagementKeyTouchPolicy {
     Cached = 0xfd,
 }
 
+/// See table 6.2 of nist 800-78-4
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]
 pub enum AuthenticateAlgorithm {
@@ -469,23 +465,29 @@ pub enum AuthenticateAlgorithm {
     Rsa1024 = 6,
     Rsa2048 = 7,
     Aes128 = 8,
-    Aes192 = 10,
-    EccP256 = 11,
-    Aes256 = 12,
-    EccP384 = 14,
+    Aes192 = 0x10,
+    EccP256 = 0x11,
+    Aes256 = 0x12,
+    EccP384 = 0x14,
+    /// Used with ecc p256
+    CipherSuite2 = 0x27,
+    /// Used with ecc p384
+    CipherSuite7 = 0x2e,
 }
 
 impl From<u8> for AuthenticateAlgorithm {
     fn from(value: u8) -> Self {
         match value {
-            3 => Self::TripleDes,
+            0 | 3 => Self::TripleDes,
             6 => Self::Rsa1024,
             7 => Self::Rsa2048,
             8 => Self::Aes128,
-            10 => Self::Aes192,
-            11 => Self::EccP256,
-            12 => Self::Aes256,
-            14 => Self::EccP384,
+            0x10 => Self::Aes192,
+            0x11 => Self::EccP256,
+            0x12 => Self::Aes256,
+            0x14 => Self::EccP384,
+            0x27 => Self::CipherSuite2,
+            0x2e => Self::CipherSuite7,
             _ => panic!("Invalid algorithm"),
         }
     }
@@ -555,4 +557,176 @@ pub struct AsymmetricRsaKey {
 #[derive(Debug)]
 pub enum AsymmetricKey {
     RsaKey(AsymmetricRsaKey),
+}
+
+#[derive(Debug, Default)]
+pub struct CardCapabilityContainer {
+    id: Option<Vec<u8>>,
+    container_version: Option<u8>,
+    grammar_version: Option<u8>,
+    url: Vec<u8>,
+    pkcs15: Option<Vec<u8>>,
+    model: Option<u8>,
+    access: Option<Vec<u8>>,
+    apdus: Option<()>,
+    redirection: Option<()>,
+    capability_tuples: Option<()>,
+    status_tuples: Option<()>,
+    next_ccc: Option<()>,
+    ext_app_url: Option<Vec<u8>>,
+    sec_obj_buf: Option<Vec<u8>>,
+    err_det_code: Option<()>,
+}
+
+impl From<&[u8]> for CardCapabilityContainer {
+    fn from(value: &[u8]) -> Self {
+        let mut s = Self::default();
+        let mut cursor = std::io::Cursor::new(value);
+        loop {
+            let tag: u8 = cursor.read_le().unwrap();
+            let len: u8 = cursor.read_le().unwrap();
+            let len = len as usize;
+            let mut data = vec![0; len];
+            cursor.read_exact(&mut data[0..len]).unwrap();
+            match tag {
+                0xf0 => {
+                    s.id = Some(data);
+                }
+                0xf1 => {
+                    s.container_version = Some(data[0]);
+                }
+                0xf2 => {
+                    s.grammar_version = Some(data[0]);
+                }
+                0xf3 => {
+                    s.url = data;
+                }
+                0xf4 => {
+                    s.pkcs15 = Some(data);
+                }
+                0xf5 => {
+                    s.model = Some(data[0]);
+                }
+                0xf6 => {
+                    s.access = Some(data);
+                }
+                0xf7 => {
+                    s.apdus = Some(());
+                }
+                0xfa => {
+                    s.redirection = Some(());
+                }
+                0xfb => {
+                    s.capability_tuples = Some(());
+                }
+                0xfc => {
+                    s.status_tuples = Some(());
+                }
+                0xfd => {
+                    s.next_ccc = Some(());
+                }
+                0xfe => {
+                    s.err_det_code = Some(());
+                    break;
+                }
+                _ => {
+                    panic!("Invalid tag {:02X}", tag);
+                }
+            }
+        }
+        s
+    }
+}
+
+/// This struct is responsible for trying to read a piv card
+pub struct PivCardReader<'a> {
+    tx: pcsc::Transaction<'a>,
+    aid: Option<Vec<u8>>,
+    ccc: Option<CardCapabilityContainer>,
+}
+
+impl<'a> PivCardReader<'a> {
+    /// Construct a new self
+    pub fn new(card: &'a mut pcsc::Card) -> Self {
+        let tx = card
+            .transaction()
+            .expect("failed to begin card transaction");
+        Self {
+            tx,
+            aid: None,
+            ccc: None,
+        }
+    }
+
+    /// get the card capability container
+    pub fn get_ccc(&mut self) -> Result<(), ()> {
+        let mut ccc: CardCapabilityContainer = Default::default();
+        let tlv =
+            tlv_parser::tlv::Tlv::new(0x5c, tlv_parser::tlv::Value::Val(vec![0x5f, 0xc1, 0x07]))
+                .unwrap();
+        let mut c = ApduCommand::new_get_data(tlv.to_vec());
+        let r = c.run_command(&self.tx);
+        if let Ok(r) = &r {
+            if let Some(d) = &r.data {
+                let tlv = Tlv::from_vec(d).unwrap();
+                if let tlv_parser::tlv::Value::Val(v) = tlv.val() {
+                    let v: &[u8] = v;
+                    ccc = v.into();
+                }
+            }
+        }
+        println!("CCC IS {:02X?}", ccc);
+        self.ccc = Some(ccc);
+        Ok(())
+    }
+
+    /// Bruteforce the aid on the card
+    pub fn bruteforce_aid(&mut self) -> Result<(), ()> {
+        let mut aid = Vec::new();
+
+        loop {
+            let mut found = false;
+            for i in 0..=255 {
+                let mut taid = aid.clone();
+                taid.push(i as u8);
+                let mut c = ApduCommand::new_select_aid(taid.to_owned());
+                let stat = c.run_command(&self.tx);
+                if let Ok(s) = stat {
+                    if let ApduStatus::CommandExecutedOk = s.status {
+                        aid.push(i);
+                        println!("AID is {:02X?}", aid);
+                        found = true;
+                    }
+                }
+            }
+            if !found {
+                break;
+            }
+        }
+        println!("AID is {:02X?}", aid);
+
+        let mut c = ApduCommand::new_select_aid(aid.to_owned());
+        let stat = c.run_command(&self.tx).map_err(|_| ())?;
+        println!("Selecting detected aid {:02X?}", stat);
+        self.aid = Some(aid);
+        Ok(())
+    }
+
+    /// Try to get the x509 certificate
+    pub fn get_x509_cert(&self) -> Option<Vec<u8>> {
+        let tlv = Tlv::new(0x5c, tlv_parser::tlv::Value::Val(vec![0x5f, 0xc1, 0x05])).unwrap();
+        let mut c = ApduCommand::new_get_data(tlv.to_vec());
+        let r = c.run_command(&self.tx);
+        if let Ok(r) = &r {
+            if let Some(d) = &r.data {
+                let tlv = Tlv::from_vec(d).unwrap();
+                println!("Tlv of x509 cert is {}", tlv);
+            } else {
+                println!("Total response is {:02X?}", r);
+            }
+        } else {
+            println!("Error for get x509 cert is {:?}", r.err());
+        }
+        None
+    }
 }
