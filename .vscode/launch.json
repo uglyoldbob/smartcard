@@ -12,10 +12,10 @@
                 "args": [
                     "build",
                     "--bin",
-                    "initialize"
+                    "examine"
                 ],
                 "filter": {
-                    "name": "initialize",
+                    "name": "examine",
                     "kind": "bin"
                 }
             },

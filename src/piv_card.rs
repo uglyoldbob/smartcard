@@ -1,4 +1,6 @@
+use des::cipher::AlgorithmName;
 use tlv_parser::tlv::Tlv;
+use tlv_parser::tlv::Value;
 
 use crate::AsymmetricKey;
 
@@ -64,15 +66,13 @@ impl<'a> PivCardReader<'a> {
     /// get the card capability container
     pub fn get_ccc(&mut self) -> Result<(), ()> {
         let mut ccc: super::CardCapabilityContainer = Default::default();
-        let tlv =
-            tlv_parser::tlv::Tlv::new(0x5c, tlv_parser::tlv::Value::Val(vec![0x5f, 0xc1, 0x07]))
-                .unwrap();
+        let tlv = Tlv::new(0x5c, Value::Val(vec![0x5f, 0xc1, 0x07])).unwrap();
         let mut c = super::ApduCommand::new_get_data(tlv.to_vec());
         let r = c.run_command(&self.tx);
         if let Ok(r) = &r {
             if let Some(d) = &r.data {
                 let tlv = Tlv::from_vec(d).unwrap();
-                if let tlv_parser::tlv::Value::Val(v) = tlv.val() {
+                if let Value::Val(v) = tlv.val() {
                     let v: &[u8] = &v;
                     ccc = v.into();
                 }
@@ -97,7 +97,6 @@ impl<'a> PivCardReader<'a> {
                 if let Ok(s) = stat {
                     if let super::ApduStatus::CommandExecutedOk = s.status {
                         aid.push(i);
-                        println!("AID is {:02X?}", aid);
                         found = true;
                     }
                 }
@@ -117,13 +116,13 @@ impl<'a> PivCardReader<'a> {
 
     /// Try to get the x509 certificate
     pub fn get_x509_cert(&self) -> Option<Vec<u8>> {
-        let tlv = Tlv::new(0x5c, tlv_parser::tlv::Value::Val(vec![0x5f, 0xc1, 0x05])).unwrap();
+        let tlv = Tlv::new(0x5c, Value::Val(vec![0x5f, 0xc1, 0x05])).unwrap();
         let mut c = super::ApduCommand::new_get_data(tlv.to_vec());
         let r = c.run_command(&self.tx);
         if let Ok(r) = &r {
             if let Some(d) = &r.data {
                 let tlv = Tlv::from_vec(d).unwrap();
-                if let tlv_parser::tlv::Value::Val(v) = tlv.val() {
+                if let Value::Val(v) = tlv.val() {
                     println!("Tlv of x509 cert is {:02X?}", v);
                     return Some(v.to_owned());
                 }
@@ -138,12 +137,15 @@ impl<'a> PivCardReader<'a> {
 
     /// Try to get some piv data
     pub fn get_piv_data(&self, tag: Vec<u8>) -> Option<Vec<u8>> {
-        let tlv = Tlv::new(0x5c, tlv_parser::tlv::Value::Val(tag)).unwrap();
+        let tlv = Tlv::new(0x5c, Value::Val(tag)).unwrap();
         let mut c = super::ApduCommand::new_get_data(tlv.to_vec());
         let r = c.run_command(&self.tx);
         if let Ok(r) = &r {
             if let Some(d) = &r.data {
                 let tlv = Tlv::from_vec(d).unwrap();
+                if let Value::Val(v) = tlv.val() {
+                    return Some(v.to_owned());
+                }
                 println!("Tlv of x509 cert is {}", tlv);
             } else {
                 println!("Total response is {:02X?}", r);
@@ -152,6 +154,58 @@ impl<'a> PivCardReader<'a> {
             println!("Error for get x509 cert is {:?}", r.err());
         }
         None
+    }
+
+    /// Authenticate with the piv pin
+    pub fn piv_pin_auth(&mut self, pin: Vec<u8>) -> Result<(), ()> {
+        let mut cmd = super::ApduCommand::new_verify_pin(pin, 0x80);
+        let resp = cmd.run_command(&self.tx).unwrap();
+        println!("Auth status is {:02X?}", resp.status);
+        if let super::ApduStatus::CommandExecutedOk = resp.status {
+        } else {
+            return Err(());
+        }
+        Ok(())
+    }
+
+    /// Sign some data
+    pub fn sign_data(&mut self, slot: Slot, pin: Vec<u8>, data: Vec<u8>) -> Option<Vec<u8>> {
+        let metadata = self.get_metadata(slot).unwrap();
+
+        self.piv_pin_auth(pin).ok()?;
+
+        let algorithm = metadata.algorithm.unwrap();
+        let tlv1 = Tlv::new(0x82, Value::Val(vec![])).unwrap();
+        let tlv2 = Tlv::new(0x81, Value::Val(data)).unwrap();
+        let tlvs = Value::TlvList(vec![tlv1, tlv2]);
+        let total = Tlv::new(0x7c, Value::Val(tlvs.to_vec())).unwrap();
+        let tlv_vec = total.to_vec();
+        let mut cmd = super::ApduCommand::new_general_authenticate(algorithm, slot, &tlv_vec);
+        let resp = cmd.run_command(&self.tx);
+        let mut signature = Vec::new();
+        if let Ok(mut r) = resp {
+            if let super::ApduStatus::ResponseBytesRemaining(_d) = r.status {
+                r.get_full_response(&self.tx);
+            }
+            if let super::ApduStatus::CommandExecutedOk = r.status {
+                let tlv = Tlv::from_vec(r.data.as_ref().unwrap()).unwrap();
+                if let Value::TlvList(tlvs) = tlv.val() {
+                    for tlv in tlvs {
+                        if tlv.tag() == 0x82 {
+                            if let Value::Val(v) = tlv.val() {
+                                signature = v.to_owned();
+                            }
+                        }
+                    }
+                }
+            } else {
+                println!("SIGN STATUS IS {:02X?}", r.status);
+            }
+        } else {
+            println!("ERR IN SIGN {:?}", resp.err());
+        }
+        println!("The signature is {:02X?}", signature);
+        Some(signature)
     }
 }
 
@@ -234,6 +288,7 @@ impl<'a> PivCardWriter<'a> {
     /// Generate an asymmetric keypair in the given slot
     pub fn generate_keypair(
         &mut self,
+        algorithm: super::AuthenticateAlgorithm,
         slot: Slot,
         pin_policy: super::KeypairPinPolicy,
     ) -> Result<AsymmetricKey, ()> {
@@ -241,10 +296,10 @@ impl<'a> PivCardWriter<'a> {
         let metadata = self.reader.get_metadata(slot);
         let mut key: Option<AsymmetricKey> = None;
         if let Some(meta) = metadata {
+            let algorithm = meta.algorithm.unwrap_or(algorithm);
             let mut cmd = super::ApduCommand::new_generate_asymmetric_key_pair(
                 slot as u8,
-                meta.algorithm
-                    .unwrap_or_else(|| super::AuthenticateAlgorithm::Rsa2048),
+                algorithm,
                 pin_policy,
                 super::KeypairTouchPolicy::Never,
             );
@@ -255,8 +310,7 @@ impl<'a> PivCardWriter<'a> {
                 }
                 if let super::ApduStatus::CommandExecutedOk = r.status {
                     println!("Command executed correctly");
-                    let lkey =
-                        r.parse_asymmetric_key_response(super::AuthenticateAlgorithm::Rsa2048);
+                    let lkey = r.parse_asymmetric_key_response(algorithm);
                     println!("The key is {:02X?}", lkey);
                     key = lkey;
                 } else {

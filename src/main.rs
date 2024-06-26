@@ -200,9 +200,11 @@ fn main() {
         let data = reader.get_piv_data(vec![0x5f, 0xc1, 5]);
         println!("Data read is {:02X?}", data);
 
-        reader.piv_pin_auth(vec![b'1', b'2', b'3', b'4', b'5', b'6']);
-        reader.piv_pin_auth(vec![]);
-        let sig = reader.sign_data(vec![0xff; 256]);
+        let sig = reader.sign_data(
+            card::Slot::Authentication,
+            vec![b'1', b'2', b'3', b'4', b'5', b'6'],
+            vec![0xff; 255],
+        );
         println!("Signature is {:02X?}", sig);
     }
 

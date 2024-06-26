@@ -18,17 +18,34 @@ fn main() {
 
         let data = writer.reader.get_piv_data(vec![0x5f, 0xc1, 5]);
         println!("Data read is {:02X?}", data);
+        let init_keys = |writer: &mut card::PivCardWriter| {
+            let keypair = writer.generate_keypair(
+                card::AuthenticateAlgorithm::Rsa2048,
+                card::Slot::Authentication,
+                card::KeypairPinPolicy::Always,
+            );
+            let keypair2 = writer.generate_keypair(
+                card::AuthenticateAlgorithm::Rsa2048,
+                card::Slot::Signing,
+                card::KeypairPinPolicy::Always,
+            );
+            let sig = writer.reader.sign_data(
+                card::Slot::Authentication,
+                vec![b'1', b'2', b'3', b'4', b'5', b'6'],
+                vec![0xff; 255],
+            );
+            let sig2 = writer.reader.sign_data(
+                card::Slot::Signing,
+                vec![b'1', b'2', b'3', b'4', b'5', b'6'],
+                vec![0xff; 255],
+            );
+            println!("Signature is {:02X?}", sig);
+            println!("Signature2 is {:02X?}", sig2);
+            writer.write_piv_data(vec![0x5f, 0xc1, 5], vec![1, 2, 3, 4, 5]);
+        };
         match data {
             None => {
-                //writer.erase_card();
-                let keypair = writer
-                    .generate_keypair(card::Slot::Authentication, card::KeypairPinPolicy::Always);
-                writer
-                    .reader
-                    .piv_pin_auth(vec![b'1', b'2', b'3', b'4', b'5', b'6']);
-                let sig = writer.reader.sign_data(vec![0xff; 256]);
-                println!("Signature is {:02X?}", sig);
-                writer.write_piv_data(vec![0x5f, 0xc1, 5], vec![1, 2, 3, 4, 5]);
+                init_keys(&mut writer);
             }
             Some(d) => {
                 println!("The data read is {:02X?}", d);

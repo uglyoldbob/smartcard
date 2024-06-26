@@ -87,7 +87,6 @@ impl ApduResponse {
             AuthenticateAlgorithm::Rsa1024 => todo!(),
             AuthenticateAlgorithm::Rsa2048 => {
                 let tlv = Tlv::from_vec(&d[0..]).unwrap();
-                println!("Tlv for asymmetric is {}", tlv);
                 if let tlv_parser::tlv::Value::TlvList(tlvs) = tlv.val() {
                     let rsa = AsymmetricRsaKey {
                         modulus: tlvs[0].val().to_vec(),
@@ -225,7 +224,6 @@ impl ApduCommand {
     pub fn get_metadata(tx: &pcsc::Transaction, slot: u8) -> Option<Metadata> {
         let mut c = Self::new_get_metadata(slot);
         let stat = c.run_command(&tx);
-        println!("Status of get metadata is {:02x?}", stat);
         if let Ok(mut s) = stat {
             if let ApduStatus::ResponseBytesRemaining(_d) = s.status {
                 s.get_full_response(&tx);
@@ -251,7 +249,6 @@ impl ApduCommand {
             };
 
             for tlv in tlvs {
-                println!("Tlv data parsed is {} {}", tlv.len(), tlv.to_string());
                 match tlv.tag() {
                     1 => {
                         meta.algorithm = Some(tlv.val().to_vec()[0].into());
@@ -501,7 +498,6 @@ impl ApduCommand {
     }
 
     pub fn run_command(&mut self, tx: &pcsc::Transaction) -> Result<ApduResponse, pcsc::Error> {
-        println!("Command is {:02X?}", self.to_vec());
         let mut rbuf: [u8; 2048] = [0; 2048];
         let stat = tx.transmit(&self.to_vec(), &mut rbuf);
         stat.map(|s| s.into())
