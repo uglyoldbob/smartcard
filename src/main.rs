@@ -1,5 +1,7 @@
 use card::*;
 use tlv_parser::tlv;
+use tlv_parser::tlv::Tlv;
+use tlv_parser::tlv::Value;
 
 fn parse_card(card: &mut pcsc::Card) -> Result<(), ()> {
     // Start an exclusive transaction (not required -- can work on card directly).
@@ -178,7 +180,7 @@ fn main() {
     for name in names {
         println!("{:?}", name);
 
-        let card = ctx.connect(&name, pcsc::ShareMode::Shared, pcsc::Protocols::ANY);
+        let card = ctx.connect(&name, pcsc::ShareMode::Exclusive, pcsc::Protocols::ANY);
         if let Err(e) = card {
             println!(
                 "Failed to connect to {}: {}",
@@ -197,6 +199,11 @@ fn main() {
 
         let data = reader.get_piv_data(vec![0x5f, 0xc1, 5]);
         println!("Data read is {:02X?}", data);
+
+        reader.piv_pin_auth(vec![b'1', b'2', b'3', b'4', b'5', b'6']);
+        reader.piv_pin_auth(vec![]);
+        let sig = reader.sign_data(vec![0xff; 256]);
+        println!("Signature is {:02X?}", sig);
     }
 
     ctx.release()

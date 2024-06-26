@@ -324,6 +324,46 @@ impl ApduCommand {
         }
     }
 
+    /// A command to verify a pin
+    pub fn new_verify_pin(pin: Vec<u8>, slot: u8) -> Self {
+        let piv_pin = if pin.is_empty() {
+            vec![]
+        } else {
+            let padding = std::iter::repeat(0xff as u8);
+            pin.into_iter().chain(padding).take(8).collect()
+        };
+        Self {
+            cla: 0,
+            ins: 0x20,
+            p1: 0,
+            p2: slot,
+            body: Some(ApduBody {
+                data: piv_pin,
+                rlen: None,
+            }),
+            response: None,
+        }
+    }
+
+    /// A new general authenticate command
+    pub fn new_general_authenticate(
+        algorithm: AuthenticateAlgorithm,
+        slot: Slot,
+        tag: &[u8],
+    ) -> Self {
+        Self {
+            cla: 0,
+            ins: 0x87,
+            p1: algorithm as u8,
+            p2: slot as u8,
+            body: Some(ApduBody {
+                data: tag.to_vec(),
+                rlen: None,
+            }),
+            response: None,
+        }
+    }
+
     /// Authenticate to the management key on the card
     pub fn new_authenticate_management1(algorithm: AuthenticateAlgorithm, mutual: bool) -> Self {
         Self {
@@ -424,7 +464,7 @@ impl ApduCommand {
                 a.push(l as u8);
             } else {
                 a.push(0);
-                let d = l.to_le_bytes();
+                let d = l.to_be_bytes();
                 a.push(d[0]);
                 a.push(d[1]);
             }
@@ -442,7 +482,7 @@ impl ApduCommand {
                         a.push(0);
                     }
                     let val: u16 = (rlen & 0xFFFF) as u16;
-                    let d = val.to_le_bytes();
+                    let d = val.to_be_bytes();
                     a.push(d[0]);
                     a.push(d[1]);
                 }
