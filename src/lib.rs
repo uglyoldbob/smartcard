@@ -604,8 +604,8 @@ pub struct Metadata {
 
 #[derive(Debug)]
 pub struct AsymmetricRsaKey {
-    modulus: Vec<u8>,
-    exponent: Vec<u8>,
+    pub modulus: Vec<u8>,
+    pub exponent: Vec<u8>,
 }
 
 #[derive(Debug)]

@@ -1,4 +1,3 @@
-use des::cipher::AlgorithmName;
 use tlv_parser::tlv::Tlv;
 use tlv_parser::tlv::Value;
 
@@ -45,6 +44,24 @@ pub enum Slot {
     Attestation = 0xf9,
 }
 
+#[derive(Debug)]
+pub enum RawPublicKey {
+    RsaPublicKey { public: Vec<u8>, modulus: Vec<u8> },
+}
+
+impl RawPublicKey {
+    pub fn to_der(&self) -> Vec<u8> {
+        match self {
+            RawPublicKey::RsaPublicKey { public, modulus } => yasna::construct_der(|w| {
+                w.write_sequence(|w| {
+                    w.next().write_bigint_bytes(public, true);
+                    w.next().write_bigint_bytes(modulus, true);
+                })
+            }),
+        }
+    }
+}
+
 impl<'a> PivCardReader<'a> {
     /// Construct a new self
     pub fn new(card: &'a mut pcsc::Card) -> Self {
@@ -59,8 +76,40 @@ impl<'a> PivCardReader<'a> {
     }
 
     /// Get the metadata about a key
-    fn get_metadata(&mut self, slot: Slot) -> Option<super::Metadata> {
+    pub fn get_metadata(&mut self, slot: Slot) -> Option<super::Metadata> {
         super::ApduCommand::get_metadata(&self.tx, slot as u8)
+    }
+
+    pub fn get_public_key(&mut self, slot: Slot) -> Option<RawPublicKey> {
+        let meta = self.get_metadata(slot)?;
+        match meta.algorithm? {
+            crate::AuthenticateAlgorithm::TripleDes => todo!(),
+            crate::AuthenticateAlgorithm::Rsa1024 | crate::AuthenticateAlgorithm::Rsa2048 => {
+                let mut modulus = None;
+                let mut public = None;
+                let pdata = meta.public.unwrap();
+                let tlv = tlv_parser::tlv::Tlv::from_vec(&pdata).unwrap();
+                let len = tlv.len();
+                let tlv2 = tlv_parser::tlv::Tlv::from_vec(&pdata[len..]).unwrap();
+                if let tlv_parser::tlv::Value::Val(v) = tlv.val() {
+                    public = Some(v.to_owned());
+                }
+                if let tlv_parser::tlv::Value::Val(v) = tlv2.val() {
+                    modulus = Some(v.to_owned());
+                }
+                Some(RawPublicKey::RsaPublicKey {
+                    public: public?,
+                    modulus: modulus?,
+                })
+            }
+            crate::AuthenticateAlgorithm::Aes128 => todo!(),
+            crate::AuthenticateAlgorithm::Aes192 => todo!(),
+            crate::AuthenticateAlgorithm::EccP256 => todo!(),
+            crate::AuthenticateAlgorithm::Aes256 => todo!(),
+            crate::AuthenticateAlgorithm::EccP384 => todo!(),
+            crate::AuthenticateAlgorithm::CipherSuite2 => todo!(),
+            crate::AuthenticateAlgorithm::CipherSuite7 => todo!(),
+        }
     }
 
     /// get the card capability container
