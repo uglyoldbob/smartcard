@@ -87,7 +87,7 @@ impl ApduResponse {
             AuthenticateAlgorithm::Rsa1024 => todo!(),
             AuthenticateAlgorithm::Rsa2048 => {
                 let tlv = Tlv::from_vec(&d[0..]).unwrap();
-                if let tlv_parser::tlv::Value::TlvList(tlvs) = tlv.val() {
+                if let Value::TlvList(tlvs) = tlv.val() {
                     let rsa = AsymmetricRsaKey {
                         modulus: tlvs[0].val().to_vec(),
                         exponent: tlvs[1].val().to_vec(),
@@ -627,8 +627,8 @@ pub struct CardCapabilityContainer {
     capability_tuples: Option<()>,
     status_tuples: Option<()>,
     next_ccc: Option<()>,
-    ext_app_url: Option<Vec<u8>>,
-    sec_obj_buf: Option<Vec<u8>>,
+    _ext_app_url: Option<Vec<u8>>,
+    _sec_obj_buf: Option<Vec<u8>>,
     err_det_code: Option<()>,
 }
 
@@ -694,3 +694,54 @@ impl From<&[u8]> for CardCapabilityContainer {
 
 mod piv_card;
 pub use piv_card::*;
+
+/// Wait until a new card is added to the system, then return the new card
+pub fn wait_for_card(new: bool) -> String {
+    let ctx = pcsc::Context::establish(pcsc::Scope::User).expect("failed to establish context");
+
+    let mut reader_states = vec![
+        // Listen for reader insertions/removals, if supported.
+        pcsc::ReaderState::new(pcsc::PNP_NOTIFICATION(), pcsc::State::UNAWARE),
+    ];
+    let mut check = !new;
+    loop {
+        // Remove dead readers.
+        fn is_dead(rs: &pcsc::ReaderState) -> bool {
+            rs.event_state()
+                .intersects(pcsc::State::UNKNOWN | pcsc::State::IGNORE)
+        }
+        reader_states.retain(|rs| !is_dead(rs));
+
+        // Add new readers.
+        let names = ctx.list_readers_owned().expect("failed to list readers");
+        for name in names {
+            if !reader_states.iter().any(|rs| rs.name() == name.as_c_str()) {
+                reader_states.push(pcsc::ReaderState::new(name, pcsc::State::UNAWARE));
+            }
+        }
+
+        // Update the view of the state to wait on.
+        for rs in &mut reader_states {
+            rs.sync_current_state();
+        }
+
+        // Wait until the state changes.
+        ctx.get_status_change(None, &mut reader_states)
+            .expect("failed to get status change");
+
+        // Print current state.
+        println!();
+        for rs in &reader_states {
+            if check && rs.name() != pcsc::PNP_NOTIFICATION() {
+                if rs.event_state().contains(pcsc::State::PRESENT) {
+                    println!("New card inserted?");
+                    let reader_name = rs.name();
+                    let _ = ctx.release();
+                    return reader_name.to_str().unwrap().to_string();
+                }
+                println!("{:?} {:?} {:?}", rs.name(), rs.event_state(), rs.atr());
+            }
+        }
+        check = true;
+    }
+}

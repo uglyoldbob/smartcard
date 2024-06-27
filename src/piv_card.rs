@@ -62,7 +62,84 @@ impl RawPublicKey {
     }
 }
 
+/// Establish a connection with a card reader, waiting until it has a valid aid
+/// This is required to overcome limitations of the software smartcard simulator
+fn establish_with<T, F: FnOnce(PivCardReader<'_>) -> T>(reader_name: String, f: F) -> T {
+    let ctx = pcsc::Context::establish(pcsc::Scope::User).expect("failed to establish context");
+    loop {
+        let mut card2;
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            println!("Connecting to {:?}", reader_name);
+            let c2 = ctx.connect(
+                &std::ffi::CString::new(reader_name.clone()).unwrap(),
+                pcsc::ShareMode::Exclusive,
+                pcsc::Protocols::ANY,
+            );
+            if let Ok(c) = c2 {
+                card2 = c;
+                break;
+            }
+        }
+        let mut reader = PivCardReader::new(&mut card2);
+        if reader.bruteforce_aid().is_ok() {
+            println!("Reader is good now");
+            return f(reader);
+        }
+    }
+}
+
+/// Wait for the next valid piv card inserted
+pub fn with_next_valid_piv_card<T, F: FnOnce(PivCardReader<'_>) -> T>(f: F) -> T {
+    let reader_name = super::wait_for_card(true);
+    establish_with(reader_name, f)
+}
+
+/// Wait for a valid piv card inserted, even if it is already inserted
+pub fn with_current_valid_piv_card<T, F: FnOnce(PivCardReader<'_>) -> T>(f: F) -> T {
+    let reader_name = super::wait_for_card(false);
+    establish_with(reader_name, f)
+}
+
+/// Wait for a valild piv card with the specified public key in the Authentication slot
+pub fn with_piv_and_public_key<T, F: Clone + FnOnce(PivCardReader<'_>) -> T>(
+    pubkey: &[u8],
+    f: F,
+) -> T {
+    let est = |reader: PivCardReader<'_>| {
+        if let Some(pubk) = reader.get_public_key(Slot::Authentication) {
+            let der = pubk.to_der();
+            if der == pubkey {
+                return Some(f(reader));
+            }
+        }
+        None
+    };
+    loop {
+        let reader_name = super::wait_for_card(false);
+        if let Some(v) = establish_with(reader_name, est.clone()) {
+            return v;
+        }
+    }
+}
+
 impl<'a> PivCardReader<'a> {
+    /// Try to find a card with a specified public key
+    pub fn search_for_public_key(&mut self, pubkey: &[u8]) -> Result<(), ()> {
+        let a = self.get_public_key(Slot::Authentication).map(|rpk| {
+            let der = rpk.to_der();
+            if &der == pubkey {
+                Ok(())
+            } else {
+                Err(())
+            }
+        });
+        match a {
+            Some(a) => a,
+            None => Err(()),
+        }
+    }
+
     /// Construct a new self
     pub fn new(card: &'a mut pcsc::Card) -> Self {
         let tx = card
@@ -76,11 +153,11 @@ impl<'a> PivCardReader<'a> {
     }
 
     /// Get the metadata about a key
-    pub fn get_metadata(&mut self, slot: Slot) -> Option<super::Metadata> {
+    pub fn get_metadata(&self, slot: Slot) -> Option<super::Metadata> {
         super::ApduCommand::get_metadata(&self.tx, slot as u8)
     }
 
-    pub fn get_public_key(&mut self, slot: Slot) -> Option<RawPublicKey> {
+    pub fn get_public_key(&self, slot: Slot) -> Option<RawPublicKey> {
         let meta = self.get_metadata(slot)?;
         match meta.algorithm? {
             crate::AuthenticateAlgorithm::TripleDes => todo!(),
@@ -135,7 +212,7 @@ impl<'a> PivCardReader<'a> {
     /// Bruteforce the aid on the card
     pub fn bruteforce_aid(&mut self) -> Result<(), ()> {
         let mut aid = Vec::new();
-
+        let mut any = false;
         loop {
             let mut found = false;
             for i in 0..=255 {
@@ -147,6 +224,7 @@ impl<'a> PivCardReader<'a> {
                     if let super::ApduStatus::CommandExecutedOk = s.status {
                         aid.push(i);
                         found = true;
+                        any = true;
                     }
                 }
             }
@@ -160,7 +238,11 @@ impl<'a> PivCardReader<'a> {
         let stat = c.run_command(&self.tx).map_err(|_| ())?;
         println!("Selecting detected aid {:02X?}", stat);
         self.aid = Some(aid);
-        Ok(())
+        if any {
+            Ok(())
+        } else {
+            Err(())
+        }
     }
 
     /// Try to get the x509 certificate
@@ -277,6 +359,11 @@ impl<'a> PivCardWriter<'a> {
         }
     }
 
+    /// Extend a reader into a writer
+    pub fn extend(reader: PivCardReader<'a>) -> Self {
+        Self { reader }
+    }
+
     /// Create a piv certificate if it does not exist
     pub fn maybe_create_x509_cert(&mut self) -> Result<(), ()> {
         Err(())
@@ -381,9 +468,10 @@ impl<'a> PivCardWriter<'a> {
             } else {
                 println!("Total response is {:02X?}", r);
             }
+            Ok(())
         } else {
             println!("Error for write data is {:?}", r.err());
+            Err(())
         }
-        Err(())
     }
 }
