@@ -5,7 +5,7 @@ use std::io::Read;
 
 use des::cipher::{generic_array::GenericArray, BlockEncrypt};
 use omnom::ReadExt;
-use tlv_parser::tlv::Tlv;
+use tlv_parser::tlv::{Tlv, Value};
 
 #[derive(Debug)]
 pub enum ApduStatus {
@@ -46,7 +46,7 @@ pub struct ApduResponse {
 
 impl ApduResponse {
     /// Process response to authenticate management1 command
-    pub fn process_response_authenticate_management1(&self) -> Option<Vec<u8>> {
+    pub fn process_response_authenticate1(&self) -> Option<Vec<u8>> {
         self.data
             .as_ref()
             .map(|d| {
@@ -322,12 +322,12 @@ impl ApduCommand {
     }
 
     /// A command to verify a pin
-    pub fn new_verify_pin(pin: Vec<u8>, slot: u8) -> Self {
+    pub fn new_verify_pin(pin: &[u8], slot: u8) -> Self {
         let piv_pin = if pin.is_empty() {
             vec![]
         } else {
             let padding = std::iter::repeat(0xff as u8);
-            pin.into_iter().chain(padding).take(8).collect()
+            pin.into_iter().map(|a| *a).chain(padding).take(8).collect()
         };
         Self {
             cla: 0,

@@ -206,7 +206,7 @@ impl<'a> PivCardReader<'a> {
     }
 
     /// Authenticate with the piv pin
-    pub fn piv_pin_auth(&mut self, pin: Vec<u8>) -> Result<(), ()> {
+    pub fn piv_pin_auth(&mut self, pin: &[u8]) -> Result<(), ()> {
         let mut cmd = super::ApduCommand::new_verify_pin(pin, 0x80);
         let resp = cmd.run_command(&self.tx).unwrap();
         println!("Auth status is {:02X?}", resp.status);
@@ -218,7 +218,7 @@ impl<'a> PivCardReader<'a> {
     }
 
     /// Sign some data
-    pub fn sign_data(&mut self, slot: Slot, pin: Vec<u8>, data: Vec<u8>) -> Option<Vec<u8>> {
+    pub fn sign_data(&mut self, slot: Slot, pin: &[u8], data: Vec<u8>) -> Option<Vec<u8>> {
         let metadata = self.get_metadata(slot).unwrap();
 
         self.piv_pin_auth(pin).ok()?;
@@ -258,7 +258,7 @@ impl<'a> PivCardReader<'a> {
     }
 }
 
-const MANAGEMENT_KEY_DEFAULT: &[u8] = &[
+pub const MANAGEMENT_KEY_DEFAULT: &[u8] = &[
     0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
     0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
 ];
@@ -290,10 +290,8 @@ impl<'a> PivCardWriter<'a> {
         Err(())
     }
 
-    fn authenticate(&mut self) -> Result<(), ()> {
+    fn authenticate_management(&mut self, management_key: &[u8]) -> Result<(), ()> {
         let md = self.reader.get_metadata(Slot::Management).unwrap();
-        println!("Metadata is {:02x?}", md);
-
         let algorithm = md
             .algorithm
             .clone()
@@ -301,17 +299,14 @@ impl<'a> PivCardWriter<'a> {
 
         let mut c = super::ApduCommand::new_authenticate_management1(algorithm, false);
         let stat = c.run_command(&self.reader.tx).unwrap();
-        println!("Status of authenticate1 is {:02x?}", stat);
         if let super::ApduStatus::CommandExecutedOk = stat.status {
-            let challenge = stat.process_response_authenticate_management1();
-            println!("Need to finish authentication now with {:02X?}", challenge);
+            let challenge = stat.process_response_authenticate1();
             let mut c2 = super::ApduCommand::new_authenticate_management2(
                 algorithm,
                 challenge.as_ref().unwrap(),
-                MANAGEMENT_KEY_DEFAULT,
+                management_key,
             );
             let stat2 = c2.run_command(&self.reader.tx);
-            println!("Response of auth2 is {:02X?}", stat2);
             if let super::ApduStatus::CommandExecutedOk = stat2.as_ref().unwrap().status {
                 println!("Success auth2");
                 Ok(())
@@ -320,28 +315,18 @@ impl<'a> PivCardWriter<'a> {
                 Err(())
             }
         } else if let super::ApduStatus::IncorrectParameter = stat.status {
-            println!("Need to initialize management key?");
-            let mut c = super::ApduCommand::new_set_management_key(
-                super::ManagementKeyTouchPolicy::NoTouch,
-                algorithm,
-                [42; 24],
-            );
-            let stat = c.run_command(&self.reader.tx);
-            println!("Status of set management key is {:02x?}", stat);
             Err(())
         } else {
             Err(())
         }
     }
 
-    /// Generate an asymmetric keypair in the given slot
-    pub fn generate_keypair(
+    fn generate_keypair(
         &mut self,
         algorithm: super::AuthenticateAlgorithm,
         slot: Slot,
         pin_policy: super::KeypairPinPolicy,
     ) -> Result<AsymmetricKey, ()> {
-        self.authenticate()?;
         let metadata = self.reader.get_metadata(slot);
         let mut key: Option<AsymmetricKey> = None;
         if let Some(meta) = metadata {
@@ -368,6 +353,18 @@ impl<'a> PivCardWriter<'a> {
             }
         }
         Ok(key.unwrap())
+    }
+
+    /// Generate an asymmetric keypair in the given slot
+    pub fn generate_keypair_with_management(
+        &mut self,
+        management_key: &[u8],
+        algorithm: super::AuthenticateAlgorithm,
+        slot: Slot,
+        pin_policy: super::KeypairPinPolicy,
+    ) -> Result<AsymmetricKey, ()> {
+        self.authenticate_management(management_key)?;
+        self.generate_keypair(algorithm, slot, pin_policy)
     }
 
     /// Write some data into a piv data object

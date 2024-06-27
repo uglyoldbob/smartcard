@@ -20,20 +20,28 @@ fn main() {
         println!("Data read is {:02X?}", data);
         let init_keys = |writer: &mut card::PivCardWriter| {
             let _keypair = writer
-                .generate_keypair(
+                .generate_keypair_with_management(
+                    card::MANAGEMENT_KEY_DEFAULT,
                     card::AuthenticateAlgorithm::Rsa2048,
                     card::Slot::Authentication,
                     card::KeypairPinPolicy::Always,
                 )
                 .unwrap();
-            let _keypair2 = writer.generate_keypair(
+            let keypair2 = writer.generate_keypair_with_management(
+                card::MANAGEMENT_KEY_DEFAULT,
                 card::AuthenticateAlgorithm::Rsa2048,
                 card::Slot::Signing,
                 card::KeypairPinPolicy::Always,
             );
-            writer
-                .write_piv_data(vec![0x5f, 0xc1, 5], vec![1, 2, 3, 4, 5])
-                .unwrap();
+            println!("Keypair2 is {:?}", keypair2);
+            if keypair2.is_err() {
+                return;
+            }
+            if false {
+                writer
+                    .write_piv_data(vec![0x5f, 0xc1, 5], vec![1, 2, 3, 4, 5])
+                    .unwrap();
+            }
         };
         match data {
             None => {
@@ -43,12 +51,12 @@ fn main() {
                 println!("The data read is {:02X?}", d);
                 let sig = writer.reader.sign_data(
                     card::Slot::Authentication,
-                    vec![b'1', b'2', b'3', b'4', b'5', b'6'],
+                    &[b'1', b'2', b'3', b'4', b'5', b'6'],
                     vec![0xff; 255],
                 );
                 let sig2 = writer.reader.sign_data(
                     card::Slot::Signing,
-                    vec![b'1', b'2', b'3', b'4', b'5', b'6'],
+                    &[b'1', b'2', b'3', b'4', b'5', b'6'],
                     vec![0xff; 255],
                 );
                 println!("Signature is {:02X?}", sig);

@@ -35,7 +35,7 @@ fn main() {
 
         let sig = reader.sign_data(
             card::Slot::Authentication,
-            vec![b'1', b'2', b'3', b'4', b'5', b'6'],
+            &[b'1', b'2', b'3', b'4', b'5', b'6'],
             vec![0xff; 255],
         );
         println!("Signature is {:02X?}", sig);
