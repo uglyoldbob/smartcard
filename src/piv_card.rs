@@ -382,8 +382,9 @@ impl<'a> PivCardWriter<'a> {
     }
 
     /// Write the contents of a piv certificate if it does not exist on the card
-    pub fn maybe_store_x509_cert(&mut self, data: &[u8]) -> Result<(), ()> {
+    pub fn maybe_store_x509_cert(&mut self, management_key: &[u8], data: &[u8]) -> Result<(), ()> {
         if self.reader.get_x509_cert().is_none() {
+            self.authenticate_management(management_key)?;
             self.write_piv_data(vec![0x5f, 0xc1, 5], data.to_vec())
         } else {
             Ok(())

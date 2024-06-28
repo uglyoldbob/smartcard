@@ -22,9 +22,6 @@ fn main() {
             if keypair2.is_err() {
                 return;
             }
-            if true {
-                writer.maybe_store_x509_cert(&[1, 2, 3, 4, 5]).unwrap();
-            }
         };
         match data {
             None => {
@@ -35,16 +32,24 @@ fn main() {
                 let sig = writer.reader.sign_data(
                     card::Slot::Authentication,
                     &[b'1', b'2', b'3', b'4', b'5', b'6'],
-                    vec![0xff; 255],
+                    vec![0xff; 256],
                 );
                 let sig2 = writer.reader.sign_data(
                     card::Slot::Signing,
                     &[b'1', b'2', b'3', b'4', b'5', b'6'],
-                    vec![0xff; 255],
+                    vec![0xff; 256],
                 );
                 println!("Signature is {:02X?}", sig);
                 println!("Signature2 is {:02X?}", sig2);
             }
+        }
+    });
+    card::with_current_valid_piv_card(|reader| {
+        let mut writer = card::PivCardWriter::extend(reader);
+        if true {
+            writer
+                .maybe_store_x509_cert(card::MANAGEMENT_KEY_DEFAULT, &[1, 2, 3, 4, 5])
+                .expect("Failed to write dummy certificate");
         }
     });
 }
