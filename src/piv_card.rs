@@ -283,10 +283,16 @@ impl<'a> PivCardReader<'a> {
     pub fn get_x509_cert(&self) -> Option<Vec<u8>> {
         let tlv = Tlv::new(0x5c, Value::Val(vec![0x5f, 0xc1, 0x05])).unwrap();
         let mut c = super::ApduCommand::new_get_data(tlv.to_vec());
-        let r = c.run_command(&self.tx);
-        if let Ok(r) = &r {
+        let mut r = c.run_command(&self.tx);
+        if let Ok(r) = &mut r {
+            if let super::ApduStatus::ResponseBytesRemaining(_d) = r.status {
+                r.get_full_response(&self.tx);
+            }
             if let Some(d) = &r.data {
-                return Some(d.to_owned());
+                let tlv = Tlv::from_vec(d).unwrap();
+                if let Value::Val(v) = tlv.val() {
+                    return Some(v.to_owned());
+                }
             }
         }
         None
