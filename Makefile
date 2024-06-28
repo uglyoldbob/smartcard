@@ -2,6 +2,9 @@
 #this makefile is for smart card sim setup and operation
 #https://github.com/OpenSC/OpenSC/wiki/Smart-Card-Simulation
 
+packages:
+	sudo apt install yubico-piv-tool
+
 fetch:
 	git clone https://github.com/arekinath/PivApplet
 	git clone https://github.com/frankmorgner/vsmartcard.git
@@ -29,8 +32,7 @@ jcardsim_piv.cfg:
 
 run: jcardsim_piv.cfg
 	pcsc_scan &
+	sleep 5 && while ! opensc-tool --card-driver default --send-apdu 80b80000120ba000000308000010000100050000020F0F7f; do sleep 0.1; done &
 	/usr/lib/jvm/java-8-openjdk-amd64/bin/java -classpath './jcardsim/target/jcardsim-3.0.5-SNAPSHOT.jar:PivApplet/src:IsoApplet/src' com.licel.jcardsim.remote.VSmartCard ./jcardsim_piv.cfg
 
-piv:
-	opensc-tool --card-driver default --send-apdu 80b80000120ba000000308000010000100050000020F0F7f
 
