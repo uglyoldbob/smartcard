@@ -286,10 +286,7 @@ impl<'a> PivCardReader<'a> {
         let r = c.run_command(&self.tx);
         if let Ok(r) = &r {
             if let Some(d) = &r.data {
-                let tlv = Tlv::from_vec(d).unwrap();
-                if let Value::Val(v) = tlv.val() {
-                    return Some(v.to_owned());
-                }
+                return Some(d.to_owned());
             }
         }
         None
