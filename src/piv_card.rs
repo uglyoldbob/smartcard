@@ -3,6 +3,7 @@ use std::cell::RefCell;
 use tlv_parser::tlv::Tlv;
 use tlv_parser::tlv::Value;
 
+use crate::ApduResponse;
 use crate::AsymmetricKey;
 
 /// This struct is responsible for trying to read a piv card
@@ -74,7 +75,6 @@ fn establish_with<T, F: FnOnce(PivCardReader<'_>) -> T>(reader_name: String, f: 
         let mut card2;
         loop {
             std::thread::sleep(std::time::Duration::from_millis(100));
-            println!("Connecting to {:?}", reader_name);
             let c2 = ctx.connect(
                 &std::ffi::CString::new(reader_name.clone()).unwrap(),
                 pcsc::ShareMode::Exclusive,
@@ -87,10 +87,31 @@ fn establish_with<T, F: FnOnce(PivCardReader<'_>) -> T>(reader_name: String, f: 
         }
         let reader = PivCardReader::new(&mut card2);
         if reader.bruteforce_aid().is_ok() {
-            println!("Reader is good now");
             return f(reader);
         }
     }
+}
+
+/// Iterate over all cards, with a filtering function, then running the specified closure on it
+fn iterate_all_piv_cards<T, F, G>(filter: G, f: F) -> Result<T, ()>
+where
+    F: FnOnce(PivCardReader<'_>) -> T,
+    G: Fn(&PivCardReader<'_>) -> bool,
+{
+    let ctx = pcsc::Context::establish(pcsc::Scope::User).expect("failed to establish context");
+    let names = ctx.list_readers_owned().expect("failed to list readers");
+    for name in names {
+        let card = ctx.connect(&name, pcsc::ShareMode::Exclusive, pcsc::Protocols::ANY);
+        if card.is_err() {
+            continue;
+        }
+        let mut card = card.unwrap();
+        let reader = PivCardReader::new(&mut card);
+        if filter(&reader) {
+            return Ok(f(reader));
+        }
+    }
+    Err(())
 }
 
 /// Wait for the next valid piv card inserted
@@ -109,20 +130,27 @@ pub fn with_current_valid_piv_card<T, F: FnOnce(PivCardReader<'_>) -> T>(f: F) -
 pub fn with_piv_and_public_key<T, F: Clone + FnOnce(PivCardReader<'_>) -> T>(
     pubkey: &[u8],
     f: F,
-) -> T {
-    let est = |reader: PivCardReader<'_>| {
-        if let Some(pubk) = reader.get_public_key(Slot::Authentication) {
-            let der = pubk.to_der();
-            if der == pubkey {
-                return Some(f(reader));
-            }
-        }
-        None
-    };
+    timeout: std::time::Duration,
+) -> Result<T, ()> {
+    let start = std::time::Instant::now();
     loop {
-        let reader_name = super::wait_for_card(false);
-        if let Some(v) = establish_with(reader_name, est.clone()) {
-            return v;
+        if let Ok(a) = iterate_all_piv_cards(
+            |reader| {
+                if reader.bruteforce_aid().is_err() {
+                    return false;
+                }
+                reader
+                    .get_public_key(Slot::Authentication)
+                    .map(|a| a.to_der() == pubkey)
+                    .unwrap_or(false)
+            },
+            |reader| f.clone()(reader),
+        ) {
+            return Ok(a);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if (std::time::Instant::now() - start) >= timeout {
+            return Err(());
         }
     }
 }
@@ -195,21 +223,22 @@ impl<'a> PivCardReader<'a> {
 
     /// get the card capability container
     pub fn get_ccc(&self) -> Result<(), ()> {
-        let mut ccc: super::CardCapabilityContainer = Default::default();
-        let tlv = Tlv::new(0x5c, Value::Val(vec![0x5f, 0xc1, 0x07])).unwrap();
-        let mut c = super::ApduCommand::new_get_data(tlv.to_vec());
-        let r = c.run_command(&self.tx);
-        if let Ok(r) = &r {
-            if let Some(d) = &r.data {
-                let tlv = Tlv::from_vec(d).unwrap();
-                if let Value::Val(v) = tlv.val() {
-                    let v: &[u8] = &v;
-                    ccc = v.into();
+        if self.ccc.borrow().is_none() {
+            let mut ccc: super::CardCapabilityContainer = Default::default();
+            let tlv = Tlv::new(0x5c, Value::Val(vec![0x5f, 0xc1, 0x07])).unwrap();
+            let mut c = super::ApduCommand::new_get_data(tlv.to_vec());
+            let r = c.run_command(&self.tx);
+            if let Ok(r) = &r {
+                if let Some(d) = &r.data {
+                    let tlv = Tlv::from_vec(d).unwrap();
+                    if let Value::Val(v) = tlv.val() {
+                        let v: &[u8] = &v;
+                        ccc = v.into();
+                    }
                 }
             }
+            self.ccc.replace(Some(ccc));
         }
-        println!("CCC IS {:02X?}", ccc);
-        self.ccc.replace(Some(ccc));
         Ok(())
     }
 
@@ -236,14 +265,16 @@ impl<'a> PivCardReader<'a> {
                 break;
             }
         }
-        println!("AID is {:02X?}", aid);
 
         let mut c = super::ApduCommand::new_select_aid(aid.to_owned());
         let stat = c.run_command(&self.tx).map_err(|_| ())?;
-        println!("Selecting detected aid {:02X?}", stat);
-        self.aid.replace(Some(aid));
-        if any {
-            Ok(())
+        if let super::ApduStatus::CommandExecutedOk = stat.status {
+            self.aid.replace(Some(aid));
+            if any {
+                Ok(())
+            } else {
+                Err(())
+            }
         } else {
             Err(())
         }
@@ -258,14 +289,9 @@ impl<'a> PivCardReader<'a> {
             if let Some(d) = &r.data {
                 let tlv = Tlv::from_vec(d).unwrap();
                 if let Value::Val(v) = tlv.val() {
-                    println!("Tlv of x509 cert is {:02X?}", v);
                     return Some(v.to_owned());
                 }
-            } else {
-                println!("Total response is {:02X?}", r);
             }
-        } else {
-            println!("Error for get x509 cert is {:?}", r.err());
         }
         None
     }
@@ -281,12 +307,7 @@ impl<'a> PivCardReader<'a> {
                 if let Value::Val(v) = tlv.val() {
                     return Some(v.to_owned());
                 }
-                println!("Tlv of x509 cert is {}", tlv);
-            } else {
-                println!("Total response is {:02X?}", r);
             }
-        } else {
-            println!("Error for get x509 cert is {:?}", r.err());
         }
         None
     }
@@ -295,12 +316,11 @@ impl<'a> PivCardReader<'a> {
     pub fn piv_pin_auth(&mut self, pin: &[u8]) -> Result<(), ()> {
         let mut cmd = super::ApduCommand::new_verify_pin(pin, 0x80);
         let resp = cmd.run_command(&self.tx).unwrap();
-        println!("Auth status is {:02X?}", resp.status);
         if let super::ApduStatus::CommandExecutedOk = resp.status {
+            Ok(())
         } else {
-            return Err(());
+            Err(())
         }
-        Ok(())
     }
 
     /// Sign some data
@@ -317,7 +337,6 @@ impl<'a> PivCardReader<'a> {
         let tlv_vec = total.to_vec();
         let mut cmd = super::ApduCommand::new_general_authenticate(algorithm, slot, &tlv_vec);
         let resp = cmd.run_command(&self.tx);
-        let mut signature = Vec::new();
         if let Ok(mut r) = resp {
             if let super::ApduStatus::ResponseBytesRemaining(_d) = r.status {
                 r.get_full_response(&self.tx);
@@ -328,19 +347,14 @@ impl<'a> PivCardReader<'a> {
                     for tlv in tlvs {
                         if tlv.tag() == 0x82 {
                             if let Value::Val(v) = tlv.val() {
-                                signature = v.to_owned();
+                                return Some(v.to_owned());
                             }
                         }
                     }
                 }
-            } else {
-                println!("SIGN STATUS IS {:02X?}", r.status);
             }
-        } else {
-            println!("ERR IN SIGN {:?}", resp.err());
         }
-        println!("The signature is {:02X?}", signature);
-        Some(signature)
+        None
     }
 }
 
@@ -349,7 +363,7 @@ pub const MANAGEMENT_KEY_DEFAULT: &[u8] = &[
     0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
 ];
 
-/// This struct is responsible for trying to mmodify a piv card
+/// This struct is responsible for trying to modify a piv card
 /// See nist 800-73-4
 pub struct PivCardWriter<'a> {
     pub reader: PivCardReader<'a>,
@@ -368,16 +382,20 @@ impl<'a> PivCardWriter<'a> {
         Self { reader }
     }
 
-    /// Create a piv certificate if it does not exist
-    pub fn maybe_create_x509_cert(&mut self) -> Result<(), ()> {
-        Err(())
+    /// Write the contents of a piv certificate if it does not exist on the card
+    pub fn maybe_store_x509_cert(&mut self, data: &[u8]) -> Result<(), ()> {
+        if self.reader.get_x509_cert().is_none() {
+            self.write_piv_data(vec![0x5f, 0xc1, 5], data.to_vec())
+        } else {
+            Ok(())
+        }
     }
 
     /// Attempt to erase the card
     pub fn erase_card(&mut self) -> Result<(), ()> {
         let mut erase = super::ApduCommand::new_erase_card();
         let erases = erase.run_command(&self.reader.tx);
-        println!("Response of erase is {:02X?}", erases);
+        todo!();
         Err(())
     }
 
@@ -399,10 +417,8 @@ impl<'a> PivCardWriter<'a> {
             );
             let stat2 = c2.run_command(&self.reader.tx);
             if let super::ApduStatus::CommandExecutedOk = stat2.as_ref().unwrap().status {
-                println!("Success auth2");
                 Ok(())
             } else {
-                println!("NOT success auth2");
                 Err(())
             }
         } else if let super::ApduStatus::IncorrectParameter = stat.status {
@@ -419,7 +435,6 @@ impl<'a> PivCardWriter<'a> {
         pin_policy: super::KeypairPinPolicy,
     ) -> Result<AsymmetricKey, ()> {
         let metadata = self.reader.get_metadata(slot);
-        let mut key: Option<AsymmetricKey> = None;
         if let Some(meta) = metadata {
             let algorithm = meta.algorithm.unwrap_or(algorithm);
             let mut cmd = super::ApduCommand::new_generate_asymmetric_key_pair(
@@ -434,16 +449,15 @@ impl<'a> PivCardWriter<'a> {
                     r.get_full_response(&self.reader.tx);
                 }
                 if let super::ApduStatus::CommandExecutedOk = r.status {
-                    println!("Command executed correctly");
                     let lkey = r.parse_asymmetric_key_response(algorithm);
-                    println!("The key is {:02X?}", lkey);
-                    key = lkey;
-                } else {
-                    println!("Status of generate keypair is {:?}", r.status);
+                    return match lkey {
+                        Some(a) => Ok(a),
+                        None => Err(()),
+                    };
                 }
             }
         }
-        Ok(key.unwrap())
+        Err(())
     }
 
     /// Generate an asymmetric keypair in the given slot

@@ -23,9 +23,7 @@ fn main() {
                 return;
             }
             if true {
-                writer
-                    .write_piv_data(vec![0x5f, 0xc1, 5], vec![1, 2, 3, 4, 5])
-                    .unwrap();
+                writer.maybe_store_x509_cert(&[1, 2, 3, 4, 5]).unwrap();
             }
         };
         match data {

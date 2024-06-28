@@ -228,7 +228,7 @@ impl ApduCommand {
             if let ApduStatus::ResponseBytesRemaining(_d) = s.status {
                 s.get_full_response(&tx);
             }
-            let sd = s.data.unwrap();
+            let sd = s.data?;
             let mut tlvs = Vec::new();
             let mut index = 0;
 
@@ -730,16 +730,13 @@ pub fn wait_for_card(new: bool) -> String {
             .expect("failed to get status change");
 
         // Print current state.
-        println!();
         for rs in &reader_states {
             if check && rs.name() != pcsc::PNP_NOTIFICATION() {
                 if rs.event_state().contains(pcsc::State::PRESENT) {
-                    println!("New card inserted?");
                     let reader_name = rs.name();
                     let _ = ctx.release();
                     return reader_name.to_str().unwrap().to_string();
                 }
-                println!("{:?} {:?} {:?}", rs.name(), rs.event_state(), rs.atr());
             }
         }
         check = true;
