@@ -1,14 +1,18 @@
+use std::cell::RefCell;
+
 use tlv_parser::tlv::Tlv;
 use tlv_parser::tlv::Value;
 
 use crate::AsymmetricKey;
 
 /// This struct is responsible for trying to read a piv card
+/// Mutable member functions might cause a change in state of the card
+/// such as locking out the pin if the incorrect pin is provided
 /// See nist 800-73-4
 pub struct PivCardReader<'a> {
     tx: pcsc::Transaction<'a>,
-    aid: Option<Vec<u8>>,
-    ccc: Option<super::CardCapabilityContainer>,
+    aid: RefCell<Option<Vec<u8>>>,
+    ccc: RefCell<Option<super::CardCapabilityContainer>>,
 }
 
 #[derive(Copy, Clone)]
@@ -81,7 +85,7 @@ fn establish_with<T, F: FnOnce(PivCardReader<'_>) -> T>(reader_name: String, f: 
                 break;
             }
         }
-        let mut reader = PivCardReader::new(&mut card2);
+        let reader = PivCardReader::new(&mut card2);
         if reader.bruteforce_aid().is_ok() {
             println!("Reader is good now");
             return f(reader);
@@ -125,7 +129,7 @@ pub fn with_piv_and_public_key<T, F: Clone + FnOnce(PivCardReader<'_>) -> T>(
 
 impl<'a> PivCardReader<'a> {
     /// Try to find a card with a specified public key
-    pub fn search_for_public_key(&mut self, pubkey: &[u8]) -> Result<(), ()> {
+    pub fn search_for_public_key(&self, pubkey: &[u8]) -> Result<(), ()> {
         let a = self.get_public_key(Slot::Authentication).map(|rpk| {
             let der = rpk.to_der();
             if &der == pubkey {
@@ -147,8 +151,8 @@ impl<'a> PivCardReader<'a> {
             .expect("failed to begin card transaction");
         Self {
             tx,
-            aid: None,
-            ccc: None,
+            aid: RefCell::new(None),
+            ccc: RefCell::new(None),
         }
     }
 
@@ -190,7 +194,7 @@ impl<'a> PivCardReader<'a> {
     }
 
     /// get the card capability container
-    pub fn get_ccc(&mut self) -> Result<(), ()> {
+    pub fn get_ccc(&self) -> Result<(), ()> {
         let mut ccc: super::CardCapabilityContainer = Default::default();
         let tlv = Tlv::new(0x5c, Value::Val(vec![0x5f, 0xc1, 0x07])).unwrap();
         let mut c = super::ApduCommand::new_get_data(tlv.to_vec());
@@ -205,12 +209,12 @@ impl<'a> PivCardReader<'a> {
             }
         }
         println!("CCC IS {:02X?}", ccc);
-        self.ccc = Some(ccc);
+        self.ccc.replace(Some(ccc));
         Ok(())
     }
 
     /// Bruteforce the aid on the card
-    pub fn bruteforce_aid(&mut self) -> Result<(), ()> {
+    pub fn bruteforce_aid(&self) -> Result<(), ()> {
         let mut aid = Vec::new();
         let mut any = false;
         loop {
@@ -237,7 +241,7 @@ impl<'a> PivCardReader<'a> {
         let mut c = super::ApduCommand::new_select_aid(aid.to_owned());
         let stat = c.run_command(&self.tx).map_err(|_| ())?;
         println!("Selecting detected aid {:02X?}", stat);
-        self.aid = Some(aid);
+        self.aid.replace(Some(aid));
         if any {
             Ok(())
         } else {
