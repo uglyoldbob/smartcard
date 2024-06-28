@@ -3,7 +3,6 @@ use std::cell::RefCell;
 use tlv_parser::tlv::Tlv;
 use tlv_parser::tlv::Value;
 
-use crate::ApduResponse;
 use crate::AsymmetricKey;
 
 /// This struct is responsible for trying to read a piv card
@@ -394,9 +393,8 @@ impl<'a> PivCardWriter<'a> {
     /// Attempt to erase the card
     pub fn erase_card(&mut self) -> Result<(), ()> {
         let mut erase = super::ApduCommand::new_erase_card();
-        let erases = erase.run_command(&self.reader.tx);
+        let _erases = erase.run_command(&self.reader.tx);
         todo!();
-        Err(())
     }
 
     fn authenticate_management(&mut self, management_key: &[u8]) -> Result<(), ()> {
