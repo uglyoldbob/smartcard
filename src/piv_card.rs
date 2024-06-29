@@ -48,6 +48,12 @@ pub enum Slot {
     Attestation = 0xf9,
 }
 
+#[derive(Debug, Default)]
+pub struct Discovery {
+    aid: Vec<u8>,
+    pin: Vec<u8>,
+}
+
 #[derive(Debug)]
 pub enum RawPublicKey {
     RsaPublicKey { public: Vec<u8>, modulus: Vec<u8> },
@@ -76,7 +82,7 @@ fn establish_with<T, F: FnOnce(PivCardReader<'_>) -> T>(reader_name: String, f: 
             std::thread::sleep(std::time::Duration::from_millis(100));
             let c2 = ctx.connect(
                 &std::ffi::CString::new(reader_name.clone()).unwrap(),
-                pcsc::ShareMode::Exclusive,
+                pcsc::ShareMode::Shared,
                 pcsc::Protocols::ANY,
             );
             if let Ok(c) = c2 {
@@ -85,7 +91,9 @@ fn establish_with<T, F: FnOnce(PivCardReader<'_>) -> T>(reader_name: String, f: 
             }
         }
         let reader = PivCardReader::new(&mut card2);
-        if reader.bruteforce_aid().is_ok() {
+        if reader.find_aid().is_ok() {
+            return f(reader);
+        } else if reader.bruteforce_aid().is_ok() {
             return f(reader);
         }
     }
@@ -100,7 +108,7 @@ where
     let ctx = pcsc::Context::establish(pcsc::Scope::User).expect("failed to establish context");
     let names = ctx.list_readers_owned().expect("failed to list readers");
     for name in names {
-        let card = ctx.connect(&name, pcsc::ShareMode::Exclusive, pcsc::Protocols::ANY);
+        let card = ctx.connect(&name, pcsc::ShareMode::Shared, pcsc::Protocols::ANY);
         if card.is_err() {
             continue;
         }
@@ -135,7 +143,7 @@ pub fn with_piv_and_public_key<T, F: Clone + FnOnce(PivCardReader<'_>) -> T>(
     loop {
         if let Ok(a) = iterate_all_piv_cards(
             |reader| {
-                if reader.bruteforce_aid().is_err() {
+                if reader.find_aid().is_err() && reader.bruteforce_aid().is_err() {
                     return false;
                 }
                 reader
@@ -241,6 +249,56 @@ impl<'a> PivCardReader<'a> {
         Ok(())
     }
 
+    /// Read the discovery object
+    pub fn read_discovery(&self) -> Option<Discovery> {
+        let mut disc = Discovery::default();
+        let a = self.get_tlv_data(vec![0x7e]);
+        if let Some(a) = a {
+            if let Value::TlvList(tlvs) = a.val() {
+                for tlv in tlvs {
+                    println!("TLV IS {}", tlv);
+                    if tlv.tag() == 0x4f {
+                        if let Value::Val(v) = tlv.val() {
+                            disc.aid = v.to_owned();
+                        }
+                    }
+                    if tlv.tag() == 0x5f2f {
+                        if let Value::Val(v) = tlv.val() {
+                            disc.pin = v.to_owned();
+                        }
+                    }
+                }
+            } else {
+                return None;
+            }
+        }
+        Some(disc)
+    }
+
+    /// Find the aid from a limited list
+    pub fn find_aid(&self) -> Result<(), ()> {
+        let aids: Vec<Vec<u8>> = vec![vec![
+            0xA0, 0x00, 0x00, 0x03, 0x08, 0x00, 0x00, 0x10, 0x00, 0x01, 0x00,
+        ]];
+        for aid in aids {
+            let mut c = super::ApduCommand::new_select_aid(aid.clone());
+            let stat = c.run_command(&self.tx);
+            if let Ok(mut s) = stat {
+                if let super::ApduStatus::ResponseBytesRemaining(_d) = s.status {
+                    s.get_full_response(&self.tx);
+                }
+                if let super::ApduStatus::CommandExecutedOk = s.status {
+                    self.aid.replace(Some(aid));
+                }
+            }
+        }
+        if self.aid.borrow().is_some() {
+            Ok(())
+        } else {
+            Err(())
+        }
+    }
+
     /// Bruteforce the aid on the card
     pub fn bruteforce_aid(&self) -> Result<(), ()> {
         let mut aid = Vec::new();
@@ -252,7 +310,10 @@ impl<'a> PivCardReader<'a> {
                 taid.push(i as u8);
                 let mut c = super::ApduCommand::new_select_aid(taid.to_owned());
                 let stat = c.run_command(&self.tx);
-                if let Ok(s) = stat {
+                if let Ok(mut s) = stat {
+                    if let super::ApduStatus::ResponseBytesRemaining(_d) = s.status {
+                        s.get_full_response(&self.tx);
+                    }
                     if let super::ApduStatus::CommandExecutedOk = s.status {
                         aid.push(i);
                         found = true;
@@ -266,7 +327,10 @@ impl<'a> PivCardReader<'a> {
         }
 
         let mut c = super::ApduCommand::new_select_aid(aid.to_owned());
-        let stat = c.run_command(&self.tx).map_err(|_| ())?;
+        let mut stat = c.run_command(&self.tx).map_err(|_| ())?;
+        if let super::ApduStatus::ResponseBytesRemaining(_d) = stat.status {
+            stat.get_full_response(&self.tx);
+        }
         if let super::ApduStatus::CommandExecutedOk = stat.status {
             self.aid.replace(Some(aid));
             if any {
@@ -300,15 +364,25 @@ impl<'a> PivCardReader<'a> {
 
     /// Try to get some piv data
     pub fn get_piv_data(&self, tag: Vec<u8>) -> Option<Vec<u8>> {
+        if let Some(tlv) = self.get_tlv_data(tag) {
+            if let Value::Val(v) = tlv.val() {
+                return Some(v.to_owned());
+            }
+        }
+        None
+    }
+
+    /// return the tlv data directly
+    pub fn get_tlv_data(&self, tag: Vec<u8>) -> Option<Tlv> {
         let tlv = Tlv::new(0x5c, Value::Val(tag)).unwrap();
         let mut c = super::ApduCommand::new_get_data(tlv.to_vec());
         let r = c.run_command(&self.tx);
         if let Ok(r) = &r {
             if let Some(d) = &r.data {
                 let tlv = Tlv::from_vec(d).unwrap();
-                if let Value::Val(v) = tlv.val() {
-                    return Some(v.to_owned());
-                }
+                return Some(tlv);
+            } else {
+                println!("GET TLV STATUS {:?}", r.status);
             }
         }
         None
