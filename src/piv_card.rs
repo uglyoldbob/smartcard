@@ -280,8 +280,8 @@ impl<'a> PivCardReader<'a> {
     }
 
     /// Try to get the x509 certificate
-    pub fn get_x509_cert(&self) -> Option<Vec<u8>> {
-        let tlv = Tlv::new(0x5c, Value::Val(vec![0x5f, 0xc1, 0x05])).unwrap();
+    pub fn get_x509_cert(&self, which: u8) -> Option<Vec<u8>> {
+        let tlv = Tlv::new(0x5c, Value::Val(vec![0x5f, 0xc1, which])).unwrap();
         let mut c = super::ApduCommand::new_get_data(tlv.to_vec());
         let mut r = c.run_command(&self.tx);
         if let Ok(r) = &mut r {
@@ -385,11 +385,16 @@ impl<'a> PivCardWriter<'a> {
     }
 
     /// Write the contents of a piv certificate if it does not exist on the card
-    pub fn maybe_store_x509_cert(&mut self, management_key: &[u8], data: &[u8]) -> Result<(), ()> {
+    pub fn maybe_store_x509_cert(
+        &mut self,
+        management_key: &[u8],
+        data: &[u8],
+        which: u8,
+    ) -> Result<(), ()> {
         if self.reader.get_x509_cert().is_none() {
             self.authenticate_management(management_key)?;
             println!("Storing cert data length {} {:02X?}", data.len(), data);
-            self.write_piv_data(vec![0x5f, 0xc1, 5], data.to_vec())
+            self.write_piv_data(vec![0x5f, 0xc1, which], data.to_vec())
         } else {
             Ok(())
         }
