@@ -5,7 +5,7 @@ fn main() {
         let der = public_key.map(|p| p.to_der());
         println!("DER ENCODING IS {:02X?}", der);
 
-        let cert = reader.get_x509_cert();
+        let cert = reader.get_x509_cert(1);
         println!("Cert is {:02X?}", cert);
     });
 
@@ -35,7 +35,7 @@ fn main() {
         pubkey,
         |reader| {
             println!("Got a card with the public key we wanted");
-            let cert = reader.get_x509_cert();
+            let cert = reader.get_x509_cert(1);
             println!("Cert is {:02X?}", cert);
         },
         std::time::Duration::from_secs(10),

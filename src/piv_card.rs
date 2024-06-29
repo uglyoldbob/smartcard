@@ -391,7 +391,7 @@ impl<'a> PivCardWriter<'a> {
         data: &[u8],
         which: u8,
     ) -> Result<(), ()> {
-        if self.reader.get_x509_cert().is_none() {
+        if self.reader.get_x509_cert(which).is_none() {
             self.authenticate_management(management_key)?;
             println!("Storing cert data length {} {:02X?}", data.len(), data);
             self.write_piv_data(vec![0x5f, 0xc1, which], data.to_vec())

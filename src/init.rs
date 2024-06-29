@@ -48,7 +48,7 @@ fn main() {
         let mut writer = card::PivCardWriter::extend(reader);
         if true {
             writer
-                .maybe_store_x509_cert(card::MANAGEMENT_KEY_DEFAULT, &[1, 2, 3, 4, 5])
+                .maybe_store_x509_cert(card::MANAGEMENT_KEY_DEFAULT, &[1, 2, 3, 4, 5], 1)
                 .expect("Failed to write dummy certificate");
         }
     });
