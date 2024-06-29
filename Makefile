@@ -3,7 +3,12 @@
 #https://github.com/OpenSC/OpenSC/wiki/Smart-Card-Simulation
 
 packages:
-	sudo apt install yubico-piv-tool
+	sudo apt install help2man
+	sudo apt install libpcsclite-dev
+	sudo apt install maven
+	sudo apt install openjdk-8-jdk
+	sudo apt install opensc
+	sudo apt install pcsc-tools
 
 fetch:
 	git clone https://github.com/arekinath/PivApplet
@@ -11,7 +16,7 @@ fetch:
 	git clone https://github.com/arekinath/jcardsim.git
 	git clone https://github.com/martinpaljak/oracle_javacard_sdks.git
 
-export JC_CLASSIC_HOME := $PWD/oracle_javacard_sdks/jc305u3_kit
+export JC_CLASSIC_HOME := ${PWD}/oracle_javacard_sdks/jc305u3_kit
 export JAVA_HOME := /usr/lib/jvm/java-8-openjdk-amd64
 
 build2:
