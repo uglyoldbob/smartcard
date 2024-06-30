@@ -474,6 +474,24 @@ impl<'a> PivCardWriter<'a> {
         }
     }
 
+    /// Update the discovery object
+    pub fn update_discovery(&mut self, disc: &Discovery) -> Result<(),()> {
+        let tlv1 = Tlv::new(0x4f, Value::Val(disc.aid.to_owned())).unwrap();
+        let tlv2 = Tlv::new(0x5f2f, Value::Val(disc.pin.to_owned())).unwrap();
+        let tlvs = Value::TlvList(vec![tlv1, tlv2]);
+        let total = Tlv::new(0x7c, Value::Val(tlvs.to_vec())).unwrap();
+        let tlv_vec = total.to_vec();
+        let tag = Tlv::new(0x7e, Value::Val(tlv_vec)).unwrap();
+        let mut cmd = super::ApduCommand::new_put_data(tag.to_vec());
+        let stat = cmd.run_command(&self.reader.tx).map_err(|_|())?;
+        if let super::ApduStatus::CommandExecutedOk = stat.status {
+            Ok(())
+        }
+        else {
+            Err(())
+        }
+    }
+
     /// Attempt to erase the card
     pub fn erase_card(&mut self) -> Result<(), ()> {
         let mut erase = super::ApduCommand::new_erase_card();
