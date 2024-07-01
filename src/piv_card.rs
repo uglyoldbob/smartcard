@@ -134,8 +134,9 @@ pub fn with_current_valid_piv_card<T, F: FnOnce(PivCardReader<'_>) -> T>(f: F) -
     establish_with(reader_name, f)
 }
 
-/// Wait for a valild piv card with the specified public key in the Authentication slot
+/// Wait for a valild piv card with the specified public key in the specified slot
 pub fn with_piv_and_public_key<T, F: Clone + FnOnce(PivCardReader<'_>) -> T>(
+    slot: Slot,
     pubkey: &[u8],
     f: F,
     timeout: std::time::Duration,
@@ -148,7 +149,7 @@ pub fn with_piv_and_public_key<T, F: Clone + FnOnce(PivCardReader<'_>) -> T>(
                     return false;
                 }
                 reader
-                    .get_public_key(Slot::Authentication)
+                    .get_public_key(slot)
                     .map(|a| a.to_der() == pubkey)
                     .unwrap_or(false)
             },
