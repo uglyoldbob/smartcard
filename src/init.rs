@@ -117,21 +117,4 @@ fn main() {
             }
         }
     }
-
-    card::with_current_valid_piv_card(|reader| {
-        let mut writer = card::PivCardWriter::extend(reader);
-        if true {
-            writer
-                .maybe_store_x509_cert(card::MANAGEMENT_KEY_DEFAULT, &[1, 2, 3, 4, 5], 1)
-                .expect("Failed to write dummy certificate");
-
-            let d = writer.reader.read_discovery();
-            if let Ok(mut d) = d {
-                d.pin[0] = 0x7c;
-                d.pin[1] = 0x0;
-                let e = writer.update_discovery(&d, card::MANAGEMENT_KEY_DEFAULT);
-                println!("Update discovery is {:02x?}", e);
-            }
-        }
-    });
 }

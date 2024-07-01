@@ -3,7 +3,6 @@ use std::cell::RefCell;
 use tlv_parser::tlv::Tlv;
 use tlv_parser::tlv::Value;
 
-use super::ApduStatus;
 use super::AsymmetricKey;
 use super::Error;
 
@@ -471,7 +470,13 @@ impl<'a> PivCardWriter<'a> {
         if self.reader.get_x509_cert(which).is_none() {
             self.authenticate_management(management_key)?;
             println!("Storing cert data length {} {:02X?}", data.len(), data);
-            self.write_piv_data(vec![0x5f, 0xc1, which], data.to_vec())
+
+            let tlv1 = Tlv::new(0x70, Value::Val(data.to_owned())).unwrap();
+            let tlv2 = Tlv::new(0x71, Value::Val(vec![0])).unwrap(); //TODO put in correct byte
+            let tlv3 = Tlv::new(0xfe, Value::Val(vec![])).unwrap();
+            let tlvs = Value::TlvList(vec![tlv1, tlv2, tlv3]);
+            println!("The cert tag is {:02X?}", tlvs.to_vec());
+            self.write_piv_data(vec![0x5f, 0xc1, which], tlvs.to_vec())
         } else {
             Ok(())
         }

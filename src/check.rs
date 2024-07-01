@@ -1,5 +1,3 @@
-use tlv_parser::tlv::Value;
-
 fn main() {
     let mut public_key = Vec::new();
     card::with_current_valid_piv_card(|reader| {
