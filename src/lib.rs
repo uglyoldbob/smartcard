@@ -7,7 +7,7 @@ use des::cipher::{generic_array::GenericArray, BlockEncrypt};
 use omnom::ReadExt;
 use tlv_parser::tlv::{Tlv, Value};
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum ApduStatus {
     AppletSelectFailed,
     ClassNotSupported,
@@ -15,10 +15,22 @@ pub enum ApduStatus {
     CommandNotAllowedNoCurrentEF,
     FileNotFound,
     FuctionNotSupported,
-    IncorrectParameter,
+    IncorrectDataParameter,
+    IncorrectP1P2Parameter,
     ResponseBytesRemaining(u8),
     SecurityFailed,
     UnknownResponse([u8; 2]),
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum Error {
+    ApduError(ApduStatus),
+    PcscError(pcsc::Error),
+    ExpectedDataMissing,
+    AlgorithmMissing,
+    MissingPublicKey,
+    MissingModulus,
+    MalformedResponse,
 }
 
 impl From<[u8; 2]> for ApduStatus {
@@ -29,7 +41,8 @@ impl From<[u8; 2]> for ApduStatus {
             (0x69, 0x82) => Self::SecurityFailed,
             (0x69, 0x86) => Self::CommandNotAllowedNoCurrentEF,
             (0x69, 0x99) => Self::AppletSelectFailed,
-            (0x6a, 0x80 | 0x86) => Self::IncorrectParameter,
+            (0x6a, 0x80) => Self::IncorrectDataParameter,
+            (0x6a, 0x86) => Self::IncorrectP1P2Parameter,
             (0x6a, 0x81) => Self::FuctionNotSupported,
             (0x6a, 0x82) => Self::FileNotFound,
             (0x90, 0x00) => Self::CommandExecutedOk,
@@ -80,7 +93,7 @@ impl ApduResponse {
     pub fn parse_asymmetric_key_response(
         &self,
         algorithm: AuthenticateAlgorithm,
-    ) -> Option<AsymmetricKey> {
+    ) -> Result<AsymmetricKey, Error> {
         let d = self.data.as_ref().unwrap();
         match algorithm {
             AuthenticateAlgorithm::TripleDes => todo!(),
@@ -92,9 +105,9 @@ impl ApduResponse {
                         modulus: tlvs[0].val().to_vec(),
                         exponent: tlvs[1].val().to_vec(),
                     };
-                    return Some(AsymmetricKey::RsaKey(rsa));
+                    return Ok(AsymmetricKey::RsaKey(rsa));
                 } else {
-                    return None;
+                    return Err(Error::MalformedResponse);
                 }
             }
             AuthenticateAlgorithm::Aes128 => todo!(),
@@ -221,14 +234,14 @@ impl ApduCommand {
     }
 
     /// Run a get metadata command and return parsed results
-    pub fn get_metadata(tx: &pcsc::Transaction, slot: u8) -> Option<Metadata> {
+    pub fn get_metadata(tx: &pcsc::Transaction, slot: u8) -> Result<Metadata, Error> {
         let mut c = Self::new_get_metadata(slot);
-        let stat = c.run_command(&tx);
-        if let Ok(mut s) = stat {
-            if let ApduStatus::ResponseBytesRemaining(_d) = s.status {
-                s.get_full_response(&tx);
-            }
-            let sd = s.data?;
+        let mut stat = c.run_command(&tx).map_err(|e| Error::PcscError(e))?;
+        if let ApduStatus::ResponseBytesRemaining(_d) = stat.status {
+            stat.get_full_response(&tx);
+        }
+        if let ApduStatus::CommandExecutedOk = stat.status {
+            let sd = stat.data.ok_or(Error::ExpectedDataMissing)?;
             let mut tlvs = Vec::new();
             let mut index = 0;
 
@@ -276,9 +289,9 @@ impl ApduCommand {
                     _ => {}
                 }
             }
-            Some(meta)
+            Ok(meta)
         } else {
-            None
+            Err(Error::ApduError(stat.status))
         }
     }
 

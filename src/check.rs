@@ -18,10 +18,14 @@ fn main() {
     // For now, copy what is generated from the initialize program, (the der output).
     card::with_piv_and_public_key(
         &public_key,
-        |reader| {
+        |mut reader| {
             println!("Got a card with the public key we wanted");
             let cert = reader.get_x509_cert(1);
             println!("Cert is {:02X?}", cert);
+            let e = reader.piv_pin_auth(card::PIV_PIN_KEY_DEFAULT);
+            println!("Pin login {:?}", e);
+            let d = reader.get_piv_data(vec![0x5f, 0xc1, 9]);
+            println!("Printed info is {:?}", d);
         },
         std::time::Duration::from_secs(10),
     )

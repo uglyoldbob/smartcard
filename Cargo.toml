@@ -12,10 +12,15 @@ name = "examine"
 path = "src/main.rs"
 
 [[bin]]
+name = "check"
+path = "src/check.rs"
+
+[[bin]]
 name = "initialize"
 path = "src/init.rs"
 
 [dependencies]
+clap = {version = "4.5.8", features = ["derive"]}
 des = "0.8.1"
 omnom = "3.0.0"
 pcsc = "2.8.2"
