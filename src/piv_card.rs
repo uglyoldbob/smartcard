@@ -460,6 +460,22 @@ impl<'a> PivCardWriter<'a> {
         Self { reader }
     }
 
+    /// Write the contents of a piv certificate, even if it exists
+    pub fn store_x509_cert(
+        &mut self,
+        management_key: &[u8],
+        data: &[u8],
+        which: u8,
+    ) -> Result<(), Error> {
+        self.authenticate_management(management_key)?;
+        println!("Storing cert data length {} {:02X?}", data.len(), data);
+        let tlv1 = Tlv::new(0x70, Value::Val(data.to_owned())).unwrap();
+        //let tlv2 = Tlv::new(0x71, Value::Val(vec![0])).unwrap();
+        let tlv3 = Tlv::new(0xfe, Value::Val(vec![])).unwrap();
+        let tlvs = Value::TlvList(vec![tlv1, tlv3]);
+        self.write_piv_data(vec![0x5f, 0xc1, which], tlvs.to_vec())
+    }
+
     /// Write the contents of a piv certificate if it does not exist on the card
     pub fn maybe_store_x509_cert(
         &mut self,
@@ -468,15 +484,7 @@ impl<'a> PivCardWriter<'a> {
         which: u8,
     ) -> Result<(), Error> {
         if self.reader.get_x509_cert(which).is_none() {
-            self.authenticate_management(management_key)?;
-            println!("Storing cert data length {} {:02X?}", data.len(), data);
-
-            let tlv1 = Tlv::new(0x70, Value::Val(data.to_owned())).unwrap();
-            let tlv2 = Tlv::new(0x71, Value::Val(vec![0])).unwrap(); //TODO put in correct byte
-            let tlv3 = Tlv::new(0xfe, Value::Val(vec![])).unwrap();
-            let tlvs = Value::TlvList(vec![tlv1, tlv2, tlv3]);
-            println!("The cert tag is {:02X?}", tlvs.to_vec());
-            self.write_piv_data(vec![0x5f, 0xc1, which], tlvs.to_vec())
+            self.store_x509_cert(management_key, data, which)
         } else {
             Ok(())
         }
