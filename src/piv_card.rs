@@ -94,8 +94,6 @@ fn establish_with<T, F: FnOnce(PivCardReader<'_>) -> T>(reader_name: String, f: 
         let reader = PivCardReader::new(&mut card2);
         if reader.find_aid().is_ok() {
             return f(reader);
-        } else if reader.bruteforce_aid().is_ok() {
-            return f(reader);
         }
     }
 }
@@ -145,7 +143,7 @@ pub fn with_piv_and_public_key<T, F: Clone + FnOnce(PivCardReader<'_>) -> T>(
     loop {
         if let Ok(a) = iterate_all_piv_cards(
             |reader| {
-                if reader.find_aid().is_err() && reader.bruteforce_aid().is_err() {
+                if reader.find_aid().is_err() {
                     return false;
                 }
                 reader

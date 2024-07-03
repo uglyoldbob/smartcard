@@ -15,6 +15,7 @@ fn main() {
 
     // For now, copy what is generated from the initialize program, (the der output).
     card::with_piv_and_public_key(
+        card::Slot::Authentication,
         &public_key,
         |reader| {
             println!("Got a card with the public key we wanted");
