@@ -709,7 +709,7 @@ mod piv_card;
 pub use piv_card::*;
 
 /// Wait until a new card is added to the system, then return the new card
-pub fn wait_for_card(new: bool) -> String {
+pub async fn wait_for_card(new: bool) -> String {
     let ctx = pcsc::Context::establish(pcsc::Scope::User).expect("failed to establish context");
 
     let mut reader_states = vec![
@@ -752,6 +752,7 @@ pub fn wait_for_card(new: bool) -> String {
                 }
             }
         }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         check = true;
     }
 }

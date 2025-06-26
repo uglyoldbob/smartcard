@@ -121,14 +121,14 @@ where
 }
 
 /// Wait for the next valid piv card inserted
-pub fn with_next_valid_piv_card<T, F: FnOnce(PivCardReader<'_>) -> T>(f: F) -> T {
-    let reader_name = super::wait_for_card(true);
+pub async fn with_next_valid_piv_card<T, F: FnOnce(PivCardReader<'_>) -> T>(f: F) -> T {
+    let reader_name = super::wait_for_card(true).await;
     establish_with(reader_name, f)
 }
 
 /// Wait for a valid piv card inserted, even if it is already inserted
-pub fn with_current_valid_piv_card<T, F: FnOnce(PivCardReader<'_>) -> T>(f: F) -> T {
-    let reader_name = super::wait_for_card(false);
+pub async fn with_current_valid_piv_card<T, F: FnOnce(PivCardReader<'_>) -> T>(f: F) -> T {
+    let reader_name = super::wait_for_card(false).await;
     establish_with(reader_name, f)
 }
 
