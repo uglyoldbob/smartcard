@@ -1,3 +1,5 @@
+//! Code related to piv cards
+
 use std::cell::RefCell;
 
 use tlv_parser::tlv::Tlv;
@@ -16,51 +18,91 @@ pub struct PivCardReader<'a> {
     ccc: RefCell<Option<super::CardCapabilityContainer>>,
 }
 
+/// The types of slots that can exist on a piv card
 #[derive(Copy, Clone)]
 #[repr(u8)]
 pub enum Slot {
+    /// the slot for the card pin
     Pin = 0x80,
+    /// the pin unblocking key
     Puk = 0x81,
+    /// the management slot
     Management = 0x9b,
+    /// retired slot
     Retired00 = 0x82,
+    /// retired slot
     Retired01 = 0x83,
+    /// retired slot
     Retired02 = 0x84,
+    /// retired slot
     Retired03 = 0x85,
+    /// retired slot
     Retired04 = 0x86,
+    /// retired slot
     Retired05 = 0x87,
+    /// retired slot
     Retired06 = 0x88,
+    /// retired slot
     Retired07 = 0x89,
+    /// retired slot
     Retired08 = 0x8a,
+    /// retired slot
     Retired09 = 0x8b,
+    /// retired slot
     Retired10 = 0x8c,
+    /// retired slot
     Retired11 = 0x8d,
+    /// retired slot
     Retired12 = 0x8e,
+    /// retired slot
     Retired13 = 0x8f,
+    /// retired slot
     Retired14 = 0x90,
+    /// retired slot
     Retired15 = 0x91,
+    /// retired slot
     Retired16 = 0x92,
+    /// retired slot
     Retired17 = 0x93,
+    /// retired slot
     Retired18 = 0x94,
+    /// retired slot
     Retired19 = 0x95,
+    /// authentication slot
     Authentication = 0x9a,
+    /// signing slot
     Signing = 0x9c,
+    /// key management slot
     KeyManagement = 0x9d,
+    /// card authentication slot
     CardAuthentication = 0x9e,
+    /// attestation slot
     Attestation = 0xf9,
 }
 
+/// Represents an object for discovery
 #[derive(Debug, Default)]
 pub struct Discovery {
+    /// The aid of the card
     pub aid: Vec<u8>,
+    /// The pin of the card
     pub pin: Vec<u8>,
 }
 
+/// A raw public key
 #[derive(Debug)]
 pub enum RawPublicKey {
-    RsaPublicKey { public: Vec<u8>, modulus: Vec<u8> },
+    /// A raw rsa public key
+    RsaPublicKey {
+        /// The public portion of the key
+        public: Vec<u8>,
+        /// The modulus of the key
+        modulus: Vec<u8>,
+    },
 }
 
 impl RawPublicKey {
+    /// Convert the raw public key to DER format
     pub fn to_der(&self) -> Vec<u8> {
         match self {
             RawPublicKey::RsaPublicKey { public, modulus } => yasna::construct_der(|w| {
@@ -198,6 +240,7 @@ impl<'a> PivCardReader<'a> {
         super::ApduCommand::get_metadata(&self.tx, slot as u8)
     }
 
+    /// Get the raw public key for a slot
     pub fn get_public_key(&self, slot: Slot) -> Result<RawPublicKey, Error> {
         let meta = self.get_metadata(slot)?;
         match meta.algorithm.ok_or(Error::AlgorithmMissing)? {
@@ -433,16 +476,19 @@ impl<'a> PivCardReader<'a> {
     }
 }
 
+/// The default management key for a piv card
 pub const MANAGEMENT_KEY_DEFAULT: &[u8] = &[
     0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
     0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
 ];
 
+/// The default pin key for a piv card
 pub const PIV_PIN_KEY_DEFAULT: &[u8] = &[b'1', b'2', b'3', b'4', b'5', b'6'];
 
 /// This struct is responsible for trying to modify a piv card
 /// See nist 800-73-4
 pub struct PivCardWriter<'a> {
+    /// The card reader
     pub reader: PivCardReader<'a>,
 }
 
@@ -519,6 +565,7 @@ impl<'a> PivCardWriter<'a> {
         todo!();
     }
 
+    /// Attempt to authenticate with the given management key
     pub fn authenticate_management(&mut self, management_key: &[u8]) -> Result<(), Error> {
         let md = self.reader.get_metadata(Slot::Management)?;
         let algorithm = md
@@ -547,6 +594,7 @@ impl<'a> PivCardWriter<'a> {
         }
     }
 
+    /// Generate a keypair on the card in the specified slot.
     fn generate_keypair(
         &mut self,
         algorithm: super::AuthenticateAlgorithm,

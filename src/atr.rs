@@ -1,18 +1,30 @@
+//! This module contains the definition for the ATR (Answer To Reset) structure.
+//! The ATR is a byte sequence that contains information about the smartcard's capabilities.
+//! It is used to identify the smartcard and to negotiate the communication parameters.
+
+/// This struct represents the Answer To Reset (ATR) of a smartcard.
 #[derive(Debug)]
 pub struct Atr {
+    /// Indicates whether the card is direct or indirect.
     pub direct: bool,
+    /// Historical bytes of the ATR.
     pub historical: Option<Vec<u8>>,
+    /// The T bytes of the ATR.
     ///ta1 is accessed with t[0][0]
     ///tb1 is accessed with t[0][1]
     ///tc1 is accessed with t[0][2]
     ///ta2 is accessed with t[1][0]
     pub t: Vec<[Option<u8>; 4]>,
+    /// the checksum of the data in the atr
     pub sum: u8,
+    /// the optional field tck, allowing for an integrity check of the ATR
     pub tck: Option<u8>,
+    /// Other data present in the ATR
     pub future: Vec<u8>,
 }
 
 impl Atr {
+    /// Returns the number of clocks per ETU, if present.
     pub fn clocks_per_etu(&self) -> Option<f32> {
         let (di, fi) = if let Some(ta1) = self.t[0][0] {
             let di = match ta1 & 0xF {
@@ -42,7 +54,7 @@ impl Atr {
         fi.and_then(|fi| di.map(|di| fi as f32 / di as f32))
     }
 
-    /// Returns the max frequency in hertz
+    /// Returns the max frequency in hertz, if present.
     pub fn max_frequency(&self) -> Option<f64> {
         if let Some(ta1) = self.t[0][0] {
             match ta1 >> 4 {

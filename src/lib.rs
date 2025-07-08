@@ -1,3 +1,10 @@
+#![deny(missing_docs)]
+#![deny(clippy::missing_docs_in_private_items)]
+#![warn(unused_extern_crates)]
+#![allow(unused)]
+
+//! Smartcard piv library.
+
 pub mod atr;
 pub mod historical;
 
@@ -7,29 +14,49 @@ use des::cipher::{generic_array::GenericArray, BlockEncrypt};
 use omnom::ReadExt;
 use tlv_parser::tlv::{Tlv, Value};
 
+/// The status of an APDU command.
 #[derive(Copy, Clone, Debug)]
 pub enum ApduStatus {
+    /// Selecting an applet failed
     AppletSelectFailed,
+    /// The class of the APDU command is not supported.
     ClassNotSupported,
+    /// The command worked just fine
     CommandExecutedOk,
+    /// The command was not allowed because there is no current EF.
     CommandNotAllowedNoCurrentEF,
+    /// The command was not allowed because the file was not found.
     FileNotFound,
-    FuctionNotSupported,
+    /// The command was not allowed because the function is not supported.
+    FunctionNotSupported,
+    /// The data parameter is incorrect.
     IncorrectDataParameter,
+    /// The P1 or P2 parameter for the command is incorrect.
     IncorrectP1P2Parameter,
+    /// There are more response bytes remaining
     ResponseBytesRemaining(u8),
+    /// Security checks failed for some reason
     SecurityFailed,
+    /// The response is unknown
     UnknownResponse([u8; 2]),
 }
 
+/// The errors for this library
 #[derive(Copy, Clone, Debug)]
 pub enum Error {
+    /// The apdu command experienced an error
     ApduError(ApduStatus),
+    /// There was a pcsc specific error that occurred
     PcscError(pcsc::Error),
+    /// The expected data for the command is missing
     ExpectedDataMissing,
+    /// An algorithm needed is missing
     AlgorithmMissing,
+    /// The public key is missing
     MissingPublicKey,
+    /// The modulus is missing
     MissingModulus,
+    /// The response is malformed
     MalformedResponse,
 }
 
@@ -43,7 +70,7 @@ impl From<[u8; 2]> for ApduStatus {
             (0x69, 0x99) => Self::AppletSelectFailed,
             (0x6a, 0x80) => Self::IncorrectDataParameter,
             (0x6a, 0x86) => Self::IncorrectP1P2Parameter,
-            (0x6a, 0x81) => Self::FuctionNotSupported,
+            (0x6a, 0x81) => Self::FunctionNotSupported,
             (0x6a, 0x82) => Self::FileNotFound,
             (0x90, 0x00) => Self::CommandExecutedOk,
             _ => Self::UnknownResponse(value),
@@ -51,9 +78,12 @@ impl From<[u8; 2]> for ApduStatus {
     }
 }
 
+/// Represents a response to a command to a smartcard
 #[derive(Debug)]
 pub struct ApduResponse {
+    /// The optional data returned by the smartcard
     pub data: Option<Vec<u8>>,
+    /// The status of the command issued to the smartcard
     pub status: ApduStatus,
 }
 
@@ -136,24 +166,34 @@ impl From<&[u8]> for ApduResponse {
     }
 }
 
+/// The main body of an apdu command to a smartcard
 #[derive(Debug)]
 pub struct ApduBody {
+    /// The data of the command
     data: Vec<u8>,
     /// If Some, represents number of bytes expected.
     rlen: Option<u32>,
 }
 
+/// Represents a complete apdu command to a smartcard
 #[derive(Debug)]
 pub struct ApduCommand {
+    /// The instruction class
     cla: u8,
+    /// The instruction code
     ins: u8,
+    /// The parameter 1
     p1: u8,
+    /// The parameter 2
     p2: u8,
+    /// The body of the command
     body: Option<ApduBody>,
+    /// The response of the command
     response: Option<ApduResponse>,
 }
 
 impl ApduCommand {
+    /// Build a new select aid command
     pub fn new_select_aid(f: Vec<u8>) -> Self {
         Self {
             cla: 0,
@@ -465,6 +505,7 @@ impl ApduCommand {
         }
     }
 
+    /// Convert the apdu command to a byte vector
     pub fn to_vec(&self) -> Vec<u8> {
         let mut a = vec![self.cla, self.ins, self.p1, self.p2];
         if let Some(body) = &self.body {
@@ -501,15 +542,18 @@ impl ApduCommand {
         a
     }
 
+    /// Provide the response of the command to the object
     pub fn provide_response(&mut self, r: Vec<u8>) {
         let a: &[u8] = &r;
         self.response = Some(a.into());
     }
 
+    /// Return a reference to the response of the command to the object
     pub fn get_response(&self) -> Option<&ApduResponse> {
         self.response.as_ref()
     }
 
+    /// Run the apdu command with the specified pcsc transaction, returning the response
     pub fn run_command(&mut self, tx: &pcsc::Transaction) -> Result<ApduResponse, pcsc::Error> {
         let mut rbuf: [u8; 2048] = [0; 2048];
         let stat = tx.transmit(&self.to_vec(), &mut rbuf);
@@ -517,10 +561,14 @@ impl ApduCommand {
     }
 }
 
+/// Defines the touch policies for a smart card management key
 #[repr(u8)]
 pub enum ManagementKeyTouchPolicy {
+    /// No touch required
     NoTouch = 0xff,
+    /// Touch required
     Touch = 0xfe,
+    /// Cached touch required
     Cached = 0xfd,
 }
 
@@ -528,13 +576,21 @@ pub enum ManagementKeyTouchPolicy {
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]
 pub enum AuthenticateAlgorithm {
+    /// Triple DES
     TripleDes = 3,
+    /// RSA 1024 bit
     Rsa1024 = 6,
+    /// RSA 2048 bit
     Rsa2048 = 7,
+    /// AES 128 bit
     Aes128 = 8,
+    /// AES 192 bit
     Aes192 = 0x10,
+    /// ECC P256
     EccP256 = 0x11,
+    /// AES 256 bit
     Aes256 = 0x12,
+    /// ECC P384
     EccP384 = 0x14,
     /// Used with ecc p256
     CipherSuite2 = 0x27,
@@ -560,12 +616,17 @@ impl From<u8> for AuthenticateAlgorithm {
     }
 }
 
+/// The policies used for the user needing to enter a pin for smartcard operations
 #[derive(Debug)]
 #[repr(u8)]
 pub enum KeypairPinPolicy {
+    /// Default policy
     Default = 0,
+    /// Never require a pin
     Never = 1,
+    /// Require a pin once
     Once = 2,
+    /// Always require a pin
     Always = 3,
 }
 
@@ -581,12 +642,17 @@ impl From<u8> for KeypairPinPolicy {
     }
 }
 
+/// The policies used for the user needing to enter a pin for smartcard touch operations
 #[derive(Debug)]
 #[repr(u8)]
 pub enum KeypairTouchPolicy {
+    /// Default policy
     Default = 0,
+    /// Never require a pin
     Never = 1,
+    /// Always require a pin
     Always = 2,
+    /// Cached pin
     Cached = 3,
 }
 
@@ -602,46 +668,73 @@ impl From<u8> for KeypairTouchPolicy {
     }
 }
 
+/// The metadata associated with a smartcard
 #[derive(Debug)]
 pub struct Metadata {
+    /// The optional algorithm specified for the smartcard
     pub algorithm: Option<AuthenticateAlgorithm>,
+    /// The optional pin policy specified for the smartcard
     pub pin_policy: Option<KeypairPinPolicy>,
+    /// The optional touch policy specified for the smartcard
     pub touch_policy: Option<KeypairTouchPolicy>,
     /// Is it generated, otherwise it is imported
     pub generated: Option<bool>,
+    /// The optional public key specified for the smartcard
     pub public: Option<Vec<u8>>,
+    /// Unsure
     pub default: Option<bool>,
     /// retry count and remaining count
     pub retries: Option<(u8, u8)>,
 }
 
+/// An RSA encryption key
 #[derive(Debug)]
 pub struct AsymmetricRsaKey {
+    /// The modulus of the key
     pub modulus: Vec<u8>,
+    /// The exponent of the key
     pub exponent: Vec<u8>,
 }
 
+/// An assymetric encryption key
 #[derive(Debug)]
 pub enum AsymmetricKey {
+    /// An RSA encryption key
     RsaKey(AsymmetricRsaKey),
 }
 
+/// The card capability container data for a smartcard
 #[derive(Debug, Default)]
 pub struct CardCapabilityContainer {
+    /// The id of the card
     id: Option<Vec<u8>>,
+    /// The version of the container
     container_version: Option<u8>,
+    /// The grammar version of the container
     grammar_version: Option<u8>,
+    /// the application card url
     url: Vec<u8>,
+    /// pkcs15 data
     pkcs15: Option<Vec<u8>>,
+    /// The model number of the registered data
     model: Option<u8>,
+    /// access control rule table
     access: Option<Vec<u8>>,
+    /// apdus for the card
     apdus: Option<()>,
+    /// the redirection tag
     redirection: Option<()>,
+    /// capability tuples
     capability_tuples: Option<()>,
+    /// Status tuples
     status_tuples: Option<()>,
+    /// The next card capability container
     next_ccc: Option<()>,
+    /// The extended application URL
     _ext_app_url: Option<Vec<u8>>,
+    /// The security object buffer
     _sec_obj_buf: Option<Vec<u8>>,
+    /// Error detection code
     err_det_code: Option<()>,
 }
 
@@ -707,6 +800,49 @@ impl From<&[u8]> for CardCapabilityContainer {
 
 mod piv_card;
 pub use piv_card::*;
+
+/// Returns some when there is a card present, otherwise None
+pub fn is_card_present() -> Option<String> {
+    let ctx = pcsc::Context::establish(pcsc::Scope::User).expect("failed to establish context");
+
+    let mut reader_states = vec![
+        // Listen for reader insertions/removals, if supported.
+        pcsc::ReaderState::new(pcsc::PNP_NOTIFICATION(), pcsc::State::UNAWARE),
+    ];
+    // Remove dead readers.
+    fn is_dead(rs: &pcsc::ReaderState) -> bool {
+        rs.event_state()
+            .intersects(pcsc::State::UNKNOWN | pcsc::State::IGNORE)
+    }
+    reader_states.retain(|rs| !is_dead(rs));
+
+    // Add new readers.
+    let names = ctx.list_readers_owned().expect("failed to list readers");
+    for name in names {
+        if !reader_states.iter().any(|rs| rs.name() == name.as_c_str()) {
+            reader_states.push(pcsc::ReaderState::new(name, pcsc::State::UNAWARE));
+        }
+    }
+
+    // Update the view of the state to wait on.
+    for rs in &mut reader_states {
+        rs.sync_current_state();
+    }
+
+    // Wait until the state changes.
+    ctx.get_status_change(None, &mut reader_states)
+        .expect("failed to get status change");
+
+    // Print current state.
+    for rs in &reader_states {
+        if rs.event_state().contains(pcsc::State::PRESENT) {
+            let reader_name = rs.name();
+            let _ = ctx.release();
+            return Some(reader_name.to_str().unwrap().to_string());
+        }
+    }
+    None
+}
 
 /// Wait until a new card is added to the system, then return the new card
 pub async fn wait_for_card(new: bool) -> String {

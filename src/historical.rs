@@ -1,13 +1,22 @@
+//! Historical bytes of the ATR.
+
+/// The category of the historical bytes.
 #[derive(Debug)]
 pub enum HistoricalCategory {
+    /// The status is present
     StatusPresent,
+    /// A directory reference in the card
     DirReference(u8),
+    /// The tlv status of the card
     StatusTlv(Vec<u8>),
+    /// Some other historical data
     Other(u8),
 }
 
+/// The historical bytes of an ATR.
 #[derive(Debug)]
 pub struct Historical {
+    /// The category of the historical bytes.
     pub category: HistoricalCategory,
 }
 
