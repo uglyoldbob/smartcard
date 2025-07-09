@@ -10,6 +10,7 @@ path = "src/lib.rs"
 [dependencies]
 clap = {version = "4.5.8", features = ["derive"]}
 des = "0.8.1"
+log = "0.4.27"
 omnom = "3.0.0"
 pcsc = "2.8.2"
 sha2 = "^0.10"
