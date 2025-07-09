@@ -12,8 +12,19 @@ clap = {version = "4.5.8", features = ["derive"]}
 des = "0.8.1"
 omnom = "3.0.0"
 pcsc = "2.8.2"
+sha2 = "^0.10"
 tlv_parser = "0.9.0"
 yasna = "0.5.2"
+
+[dependencies.cert-common]
+version = "0.1.0"
+git = "https://github.com/uglyoldbob/cert-common.git"
+
+[dependencies.rcgen]
+version = "0.13.0"
+git = "https://github.com/uglyoldbob/rcgen.git"
+branch = "attributes"
+features = ["ring", "pem", "x509-parser"]
 
 [dependencies.tokio]
 version = "1.36.0"

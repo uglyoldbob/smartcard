@@ -656,3 +656,159 @@ impl<'a> PivCardWriter<'a> {
         }
     }
 }
+
+
+/// A keypair for a smartcard
+#[derive(Clone, Debug)]
+pub struct KeyPair {
+    /// The public key for the certificate that contains the private key used to sign
+    public_key: Vec<u8>,
+    /// The algorithm to sign with
+    algorithm: crate::AuthenticateAlgorithm,
+    /// The name of the keypair/certificate
+    label: String,
+    /// The pin for the smartcard
+    pin: Vec<u8>,
+}
+
+/// The errors that can occur when commmunicating with a smart card
+#[derive(Debug)]
+pub enum PivCardError {
+    /// A specific card error
+    CardError(crate::Error),
+    /// A timeout waiting for a card to be detected
+    Timeout,
+}
+
+impl rcgen::RemoteKeyPair for KeyPair {
+    fn algorithm(&self) -> &'static rcgen::SignatureAlgorithm {
+        match self.algorithm {
+            crate::AuthenticateAlgorithm::TripleDes => todo!(),
+            crate::AuthenticateAlgorithm::Rsa1024 | crate::AuthenticateAlgorithm::Rsa2048 => {
+                rcgen::SignatureAlgorithm::from_oid(
+                    &cert_common::oid::OID_PKCS1_SHA256_RSA_ENCRYPTION.components(),
+                )
+                .unwrap()
+            }
+            crate::AuthenticateAlgorithm::Aes128 => todo!(),
+            crate::AuthenticateAlgorithm::Aes192 => todo!(),
+            crate::AuthenticateAlgorithm::EccP256 => todo!(),
+            crate::AuthenticateAlgorithm::Aes256 => todo!(),
+            crate::AuthenticateAlgorithm::EccP384 => todo!(),
+            crate::AuthenticateAlgorithm::CipherSuite2 => todo!(),
+            crate::AuthenticateAlgorithm::CipherSuite7 => todo!(),
+        }
+    }
+
+    fn public_key(&self) -> &[u8] {
+        &self.public_key
+    }
+
+    fn sign(&self, msg: &[u8]) -> Result<Vec<u8>, rcgen::Error> {
+        self.sign_with_pin(msg)
+    }
+}
+
+impl KeyPair {
+    /// Get the label for the keypair
+    pub fn label(&self) -> String {
+        self.label.clone()
+    }
+
+    /// Create an rcgen keypair from the smartcard keypair
+    pub fn rcgen(&self) -> rcgen::KeyPair {
+        rcgen::KeyPair::from_remote(Box::new(self.clone())).unwrap()
+    }
+
+    fn keysize_bytes(&self) -> usize {
+        match &self.algorithm {
+            crate::AuthenticateAlgorithm::TripleDes => todo!(),
+            crate::AuthenticateAlgorithm::Rsa1024 => 128,
+            crate::AuthenticateAlgorithm::Rsa2048 => 256,
+            crate::AuthenticateAlgorithm::Aes128 => todo!(),
+            crate::AuthenticateAlgorithm::Aes192 => todo!(),
+            crate::AuthenticateAlgorithm::EccP256 => todo!(),
+            crate::AuthenticateAlgorithm::Aes256 => todo!(),
+            crate::AuthenticateAlgorithm::EccP384 => todo!(),
+            crate::AuthenticateAlgorithm::CipherSuite2 => todo!(),
+            crate::AuthenticateAlgorithm::CipherSuite7 => todo!(),
+        }
+    }
+
+    /// Sign data with the pin specified for the card
+    pub fn sign_with_pin(&self, data: &[u8]) -> Result<Vec<u8>, rcgen::Error> {
+        use sha2::Digest;
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(data);
+        let hash = hasher.finalize();
+        let hashed = crate::pkcs15_sha256(self.keysize_bytes(), &hash);
+        let a = crate::with_piv_and_public_key(
+            crate::Slot::Authentication,
+            &self.public_key,
+            |mut reader| reader.sign_data(crate::Slot::Authentication, &self.pin, hashed),
+            std::time::Duration::from_secs(10),
+        );
+        match a {
+            Ok(Ok(a)) => Ok(a),
+            _ => Err(rcgen::Error::RemoteKeyError),
+        }
+    }
+
+    /// Create a new KeyPair
+    pub async fn generate_with_smartcard(
+        pin: Vec<u8>,
+        label: &str,
+        wait_for_card: bool,
+    ) -> Option<Self> {
+        let algorithm = crate::AuthenticateAlgorithm::Rsa2048;
+        let pubkey = if wait_for_card {
+            crate::with_next_valid_piv_card(|reader| {
+                let mut writer = crate::PivCardWriter::extend(reader);
+                writer.generate_keypair_with_management(
+                    crate::MANAGEMENT_KEY_DEFAULT,
+                    algorithm,
+                    crate::Slot::Authentication,
+                    crate::KeypairPinPolicy::Once,
+                )?;
+                writer.reader.get_public_key(crate::Slot::Authentication)
+            })
+            .await
+        } else {
+            crate::with_current_valid_piv_card(|reader| {
+                let mut writer = crate::PivCardWriter::extend(reader);
+                writer.generate_keypair_with_management(
+                    crate::MANAGEMENT_KEY_DEFAULT,
+                    algorithm,
+                    crate::Slot::Authentication,
+                    crate::KeypairPinPolicy::Once,
+                )?;
+                writer.reader.get_public_key(crate::Slot::Authentication)
+            })
+            .await
+        };
+        Some(Self {
+            label: label.to_string(),
+            public_key: pubkey.ok()?.to_der(),
+            algorithm,
+            pin,
+        })
+    }
+
+    /// Save the cert as specified to the card into the authentication slot on the smartcard
+    /// The public key must match before the cert will be stored
+    pub fn save_cert_to_card(&self, cert: &[u8]) -> Result<(), PivCardError> {
+        match crate::with_piv_and_public_key(
+            crate::Slot::Authentication,
+            &self.public_key,
+            |reader| {
+                let mut writer = crate::PivCardWriter::extend(reader);
+                writer.maybe_store_x509_cert(crate::MANAGEMENT_KEY_DEFAULT, cert, 5)
+            },
+            std::time::Duration::from_secs(10),
+        ) {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => Err(PivCardError::CardError(e)),
+            _ => Err(PivCardError::Timeout),
+        }
+    }
+}
