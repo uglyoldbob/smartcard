@@ -451,6 +451,7 @@ impl<'a> PivCardReader<'a> {
 
         let algorithm = metadata.algorithm.unwrap();
         let tlv1 = Tlv::new(0x82, Value::Val(vec![])).unwrap();
+        log::debug!("Raw data to sign is {:x?}", data);
         let tlv2 = Tlv::new(0x81, Value::Val(data)).unwrap();
         let tlvs = Value::TlvList(vec![tlv1, tlv2]);
         let total = Tlv::new(0x7c, Value::Val(tlvs.to_vec())).unwrap();
