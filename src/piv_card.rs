@@ -697,6 +697,7 @@ pub enum PivCardError {
 
 impl rcgen::RemoteKeyPair for KeyPair {
     fn algorithm(&self) -> &'static rcgen::SignatureAlgorithm {
+        log::debug!("The smartcard keypair algorithm is {:?}", self.algorithm);
         match self.algorithm {
             crate::AuthenticateAlgorithm::TripleDes => todo!(),
             crate::AuthenticateAlgorithm::Rsa1024 | crate::AuthenticateAlgorithm::Rsa2048 => {
@@ -720,6 +721,7 @@ impl rcgen::RemoteKeyPair for KeyPair {
     }
 
     fn sign(&self, msg: &[u8]) -> Result<Vec<u8>, rcgen::Error> {
+        log::debug!("About to sign data of length {}", msg.len());
         self.sign_with_pin(msg)
     }
 }
@@ -765,7 +767,10 @@ impl KeyPair {
         );
         match a {
             Ok(Ok(a)) => Ok(a),
-            _ => Err(rcgen::Error::RemoteKeyError),
+            a => {
+                log::error!("Error signing with pin {:?}", a);
+                Err(rcgen::Error::RemoteKeyError)
+            }
         }
     }
 
