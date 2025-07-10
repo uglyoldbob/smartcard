@@ -854,6 +854,7 @@ pub async fn wait_for_card(new: bool) -> String {
     ];
     let mut check = !new;
     loop {
+        log::debug!("Checking for a piv card");
         // Remove dead readers.
         fn is_dead(rs: &pcsc::ReaderState) -> bool {
             rs.event_state()
@@ -880,6 +881,7 @@ pub async fn wait_for_card(new: bool) -> String {
 
         // Print current state.
         for rs in &reader_states {
+            log::debug!("Checking reader {:?}: {:?}", rs.name(), rs.event_state());
             if check && rs.name() != pcsc::PNP_NOTIFICATION() {
                 if rs.event_state().contains(pcsc::State::PRESENT) {
                     let reader_name = rs.name();
