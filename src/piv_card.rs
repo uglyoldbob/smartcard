@@ -456,6 +456,7 @@ impl<'a> PivCardReader<'a> {
         let total = Tlv::new(0x7c, Value::Val(tlvs.to_vec())).unwrap();
         let tlv_vec = total.to_vec();
         let mut cmd = super::ApduCommand::new_general_authenticate(algorithm, slot, &tlv_vec);
+        log::debug!("Sign data apdu command is {:x?}", cmd);
         let mut resp = cmd.run_command(&self.tx).map_err(|e| Error::PcscError(e))?;
         log::debug!("Response to sign data is {:x?}", resp);
         if let super::ApduStatus::ResponseBytesRemaining(_d) = resp.status {
