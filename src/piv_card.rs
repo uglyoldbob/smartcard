@@ -460,6 +460,7 @@ impl<'a> PivCardReader<'a> {
         if let super::ApduStatus::ResponseBytesRemaining(_d) = resp.status {
             resp.get_full_response(&self.tx);
         }
+        log::debug!("Response to sign data is {:x?}", resp.data);
         if let super::ApduStatus::CommandExecutedOk = resp.status {
             let tlv = Tlv::from_vec(resp.data.as_ref().unwrap()).unwrap();
             if let Value::TlvList(tlvs) = tlv.val() {
@@ -470,11 +471,14 @@ impl<'a> PivCardReader<'a> {
                         }
                     }
                 }
+                log::error!("Malformed response c signing data");
                 return Err(Error::MalformedResponse);
             } else {
+                log::error!("Malformed response b signing data");
                 return Err(Error::MalformedResponse);
             }
         } else {
+            log::error!("Malformed response a signing data");
             return Err(Error::MalformedResponse);
         }
     }
