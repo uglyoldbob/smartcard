@@ -765,7 +765,7 @@ impl KeyPair {
         let mut hasher = sha2::Sha256::new();
         hasher.update(data);
         let hash = hasher.finalize();
-        let hashed = crate::pkcs15_sha256(self.keysize_bytes(), &hash);
+        let hashed = crate::pkcs15_sha256(self.keysize_bytes() - 1, &hash);
         let a = crate::with_piv_and_public_key(
             crate::Slot::Authentication,
             &self.public_key,
