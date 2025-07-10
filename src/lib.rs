@@ -879,6 +879,7 @@ pub async fn wait_for_card(new: bool) -> String {
         ctx.get_status_change(None, &mut reader_states)
             .expect("failed to get status change");
 
+        log::debug!("Check state is {}", check);
         // Print current state.
         for rs in &reader_states {
             log::debug!("Checking reader {:?}: {:?}", rs.name(), rs.event_state());
