@@ -763,6 +763,7 @@ impl KeyPair {
         let algorithm = crate::AuthenticateAlgorithm::Rsa2048;
         log::info!("About to generate a keypair on a smartcard");
         let pubkey = if wait_for_card {
+            log::debug!("Waiting for next valid piv smartcard");
             crate::with_next_valid_piv_card(|reader| {
                 log::info!("Generating keypair with newest piv card");
                 let mut writer = crate::PivCardWriter::extend(reader);
@@ -776,6 +777,7 @@ impl KeyPair {
             })
             .await
         } else {
+            log::debug!("Looking for current valid piv smartcard");
             crate::with_current_valid_piv_card(|reader| {
                 log::info!("Generating keypair with current piv card");
                 let mut writer = crate::PivCardWriter::extend(reader);
