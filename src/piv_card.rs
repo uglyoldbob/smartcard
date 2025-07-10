@@ -605,24 +605,33 @@ impl<'a> PivCardWriter<'a> {
         slot: Slot,
         pin_policy: super::KeypairPinPolicy,
     ) -> Result<AsymmetricKey, Error> {
+        log::debug!("Start generate smartcard keypair");
         let meta = self.reader.get_metadata(slot)?;
+        log::debug!("Got metadata {:?}", meta);
         let algorithm = meta.algorithm.unwrap_or(algorithm);
+        log::debug!("Got algorithm: {:?}", algorithm);
         let mut cmd = super::ApduCommand::new_generate_asymmetric_key_pair(
             slot as u8,
             algorithm,
             pin_policy,
             super::KeypairTouchPolicy::Never,
         );
+        log::debug!("Running the generate command");
         let mut r = cmd
             .run_command(&self.reader.tx)
             .map_err(|e| Error::PcscError(e))?;
+        log::debug!("Reading response bytes");
         if let super::ApduStatus::ResponseBytesRemaining(_d) = r.status {
             r.get_full_response(&self.reader.tx);
         }
+        log::debug!("Read full response");
         if let super::ApduStatus::CommandExecutedOk = r.status {
+            log::debug!("Parsing assymetric key response");
             let lkey = r.parse_asymmetric_key_response(algorithm)?;
+            log::debug!("Got an asymmetric key");
             Ok(lkey)
         } else {
+            log::debug!("Error in response {:?}", r.status);
             Err(Error::ApduError(r.status))
         }
     }
@@ -635,7 +644,9 @@ impl<'a> PivCardWriter<'a> {
         slot: Slot,
         pin_policy: super::KeypairPinPolicy,
     ) -> Result<AsymmetricKey, Error> {
+        log::debug!("Authenticating to card for keypair generation");
         self.authenticate_management(management_key)?;
+        log::debug!("Authenticated");
         self.generate_keypair(algorithm, slot, pin_policy)
     }
 
