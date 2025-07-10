@@ -132,11 +132,15 @@ fn establish_with<T, F: FnOnce(PivCardReader<'_>) -> T>(reader_name: String, f: 
                 card2 = c;
                 break;
             }
+            log::debug!("Error getting card2: {:?}", c2.err());
         }
+        log::debug!("Got card2");
         let reader = PivCardReader::new(&mut card2);
         if reader.find_aid().is_ok() {
+            log::debug!("Calling the closure with card2");
             return f(reader);
         }
+        log::debug!("Done with establish_with");
     }
 }
 
