@@ -884,13 +884,16 @@ pub async fn wait_for_card(new: bool) -> String {
         for rs in &reader_states {
             log::debug!("Checking reader {:?}: {:?}", rs.name(), rs.event_state());
             if check && rs.name() != pcsc::PNP_NOTIFICATION() {
+                log::debug!("Checking to see if state contains present");
                 if rs.event_state().contains(pcsc::State::PRESENT) {
+                    log::debug!("Card is found");
                     let reader_name = rs.name();
                     let _ = ctx.release();
                     return reader_name.to_str().unwrap().to_string();
                 }
             }
         }
+        log::debug!("Sleeping a bit");
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         check = true;
     }
