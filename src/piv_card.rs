@@ -503,6 +503,87 @@ pub struct PivCardWriter<'a> {
     pub reader: PivCardReader<'a>,
 }
 
+enum CustomTlvData {
+    UnstructuredData(Vec<u8>),
+    List(Vec<u8>),
+}
+
+impl CustomTlvData {
+    fn make_data(tag: Vec<u8>, mut data: Vec<u8>) -> Vec<u8> {
+        let mut d = Vec::new();
+        d.append(&mut tag.clone());
+
+        let mut d1 = if data.is_empty() {
+            vec![0]
+        } else if data.len() < 128 {
+            vec![data.len() as u8]
+        } else if data.len() < 256 {
+            vec![0x81, data.len() as u8]
+        } else if data.len() < 0x10000 {
+            let d = data.len().to_le_bytes();
+            vec![0x82, d[1], d[0]]
+        } else {
+            let d = data.len().to_le_bytes();
+            vec![0x83, d[3], d[2], d[1], d[0]]
+        };
+        d.append(&mut d1);
+        d.append(&mut data);
+        d
+    }
+
+    pub fn new_unstructured(tag: Vec<u8>, mut data: Vec<u8>) -> Self {
+        Self::UnstructuredData(Self::make_data(tag, data))
+    }
+
+    pub fn to_data(self) -> Vec<u8> {
+        match self {
+            CustomTlvData::UnstructuredData(items) => items,
+            CustomTlvData::List(items) => items,
+        }
+    }
+
+    pub fn new_list(tag: Vec<u8>, l: Vec<CustomTlvData>) -> Self {
+        let mut d = Vec::new();
+        for el in l {
+            d.append(&mut el.to_data());
+        }
+        Self::List(Self::make_data(tag, d))
+    }
+}
+
+fn build_x509_tlv(data: &[u8],) -> Vec<u8> {
+    let c = CustomTlvData::new_unstructured(vec![0x70], data.to_vec());
+    let d = CustomTlvData::new_unstructured(vec![0x71], vec![0]);
+    let e = CustomTlvData::new_unstructured(vec![0xfe], vec![]);
+    let mut data = c.to_data();
+    data.append(&mut d.to_data());
+    data.append(&mut e.to_data());
+    data
+}
+
+fn build_piv_data(tag: Vec<u8>, data: Vec<u8>) -> Vec<u8> {
+    let f = CustomTlvData::new_unstructured(vec![0x5c], tag);
+    let g = CustomTlvData::new_unstructured(vec![0x53], data);
+    let mut data = f.to_data();
+    data.append(&mut g.to_data());
+    data
+}
+
+#[test]
+fn test_build_x509_data() {
+    let data = vec![0; 1025];
+    let t = build_x509_tlv(data.as_slice());
+    println!("Data is {:x?}", t);
+}
+
+#[test]
+fn test_build_piv_data() {
+    let data = vec![0; 1025];
+    let data2 = build_x509_tlv(&data);
+    let t = build_piv_data(vec![0x5f, 0xc1, 0x05], data2);
+    println!("Data2 is {:x?}", t);
+}
+
 impl<'a> PivCardWriter<'a> {
     /// Construct a new self
     pub fn new(card: &'a mut pcsc::Card) -> Self {
@@ -525,15 +606,8 @@ impl<'a> PivCardWriter<'a> {
     ) -> Result<(), Error> {
         self.authenticate_management(management_key)?;
         println!("Storing cert data length {} {:02X?}", data.len(), data);
-        
-        let len = (data.len() as u16).to_be_bytes();
-        let mut mdata = vec![0x70, 0x82, len[0], len[1]];
-        mdata.append(&mut data.to_vec());
-        let tlv1 = Tlv::new(0x70, Value::Val(mdata)).unwrap();
-        //let tlv2 = Tlv::new(0x71, Value::Val(vec![0])).unwrap();
-        let tlv3 = Tlv::new(0xfe, Value::Val(vec![])).unwrap();
-        let tlvs = Value::TlvList(vec![tlv1, tlv3]);
-        self.write_piv_data(vec![0x5f, 0xc1, 0x05], tlvs.to_vec())
+        let tlv = build_x509_tlv(data);
+        self.write_piv_data(vec![0x5f, 0xc1, 0x05], tlv)
     }
 
     /// Write the contents of a piv certificate in der format, if it does not exist on the card
@@ -664,10 +738,8 @@ impl<'a> PivCardWriter<'a> {
     /// Write some data into a piv data object
     pub fn write_piv_data(&mut self, tag: Vec<u8>, data: Vec<u8>) -> Result<(), Error> {
         log::info!("Write piv data with {:x?} and {:x?}", tag, data);
-        let tlv = Tlv::new(0x5c, tlv_parser::tlv::Value::Val(tag)).unwrap();
-        let tlv2 = Tlv::new(0x53, tlv_parser::tlv::Value::Val(data)).unwrap();
-        let tlv_total = tlv_parser::tlv::Value::TlvList(vec![tlv, tlv2]);
-        let mut c = super::ApduCommand::new_put_data(tlv_total.to_vec());
+        let t = build_piv_data(tag, data);
+        let mut c = super::ApduCommand::new_put_data(t);
         log::info!("The command to write piv data is {:x?}", c.to_vec());
         let r = c.run_command(&self.reader.tx);
         match r {
