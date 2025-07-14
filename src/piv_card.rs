@@ -525,7 +525,11 @@ impl<'a> PivCardWriter<'a> {
     ) -> Result<(), Error> {
         self.authenticate_management(management_key)?;
         println!("Storing cert data length {} {:02X?}", data.len(), data);
-        let tlv1 = Tlv::new(0x70, Value::Val(data.to_owned())).unwrap();
+        
+        let len = (data.len() as u16).to_le_bytes();
+        let mut mdata = vec![0x70, len[0], len[1]];
+        mdata.append(&mut data.to_vec());
+        let tlv1 = Tlv::new(0x70, Value::Val(mdata.to_owned())).unwrap();
         //let tlv2 = Tlv::new(0x71, Value::Val(vec![0])).unwrap();
         let tlv3 = Tlv::new(0xfe, Value::Val(vec![])).unwrap();
         let tlvs = Value::TlvList(vec![tlv1, tlv3]);
