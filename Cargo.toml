@@ -1,6 +1,6 @@
 [package]
 name = "card"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [lib]
@@ -18,7 +18,7 @@ tlv_parser = "0.10.0"
 yasna = "0.5.2"
 
 [dependencies.cert-common]
-version = "0.1.0"
+version = "0.2.0"
 git = "https://github.com/uglyoldbob/cert-common.git"
 
 [dependencies.rcgen]
