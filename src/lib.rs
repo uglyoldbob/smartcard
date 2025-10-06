@@ -845,7 +845,62 @@ pub fn is_card_present() -> Option<String> {
 }
 
 /// Wait until a new card is added to the system, then return the new card
-pub async fn wait_for_card(new: bool) -> String {
+pub fn wait_for_card(new: bool) -> String {
+    let ctx = pcsc::Context::establish(pcsc::Scope::User).expect("failed to establish context");
+
+    let mut reader_states = vec![
+        // Listen for reader insertions/removals, if supported.
+        pcsc::ReaderState::new(pcsc::PNP_NOTIFICATION(), pcsc::State::UNAWARE),
+    ];
+    let mut check = !new;
+    loop {
+        log::debug!("Checking for a piv card");
+        // Remove dead readers.
+        fn is_dead(rs: &pcsc::ReaderState) -> bool {
+            rs.event_state()
+                .intersects(pcsc::State::UNKNOWN | pcsc::State::IGNORE)
+        }
+        reader_states.retain(|rs| !is_dead(rs));
+
+        // Add new readers.
+        let names = ctx.list_readers_owned().expect("failed to list readers");
+        for name in names {
+            if !reader_states.iter().any(|rs| rs.name() == name.as_c_str()) {
+                reader_states.push(pcsc::ReaderState::new(name, pcsc::State::UNAWARE));
+            }
+        }
+
+        // Update the view of the state to wait on.
+        for rs in &mut reader_states {
+            rs.sync_current_state();
+        }
+
+        // Wait until the state changes.
+        ctx.get_status_change(None, &mut reader_states)
+            .expect("failed to get status change");
+
+        log::debug!("Check state is {}", check);
+        // Print current state.
+        for rs in &reader_states {
+            log::debug!("Checking reader {:?}: {:?}", rs.name(), rs.event_state());
+            if check && rs.name() != pcsc::PNP_NOTIFICATION() {
+                log::debug!("Checking to see if state contains present");
+                if rs.event_state().contains(pcsc::State::PRESENT) {
+                    log::debug!("Card is found");
+                    let reader_name = rs.name();
+                    let _ = ctx.release();
+                    return reader_name.to_str().unwrap().to_string();
+                }
+            }
+        }
+        log::debug!("Sleeping a bit");
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        check = true;
+    }
+}
+
+/// Wait until a new card is added to the system, then return the new card
+pub async fn wait_for_card_async(new: bool) -> String {
     let ctx = pcsc::Context::establish(pcsc::Scope::User).expect("failed to establish context");
 
     let mut reader_states = vec![

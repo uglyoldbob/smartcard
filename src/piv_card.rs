@@ -167,14 +167,26 @@ where
 }
 
 /// Wait for the next valid piv card inserted
-pub async fn with_next_valid_piv_card<T, F: FnOnce(PivCardReader<'_>) -> T>(f: F) -> T {
-    let reader_name = super::wait_for_card(true).await;
+pub async fn with_next_valid_piv_card_async<T, F: FnOnce(PivCardReader<'_>) -> T>(f: F) -> T {
+    let reader_name = super::wait_for_card_async(true).await;
     establish_with(reader_name, f)
 }
 
 /// Wait for a valid piv card inserted, even if it is already inserted
-pub async fn with_current_valid_piv_card<T, F: FnOnce(PivCardReader<'_>) -> T>(f: F) -> T {
-    let reader_name = super::wait_for_card(false).await;
+pub async fn with_current_valid_piv_card_async<T, F: FnOnce(PivCardReader<'_>) -> T>(f: F) -> T {
+    let reader_name = super::wait_for_card_async(false).await;
+    establish_with(reader_name, f)
+}
+
+/// Wait for the next valid piv card inserted
+pub fn with_next_valid_piv_card<T, F: FnOnce(PivCardReader<'_>) -> T>(f: F) -> T {
+    let reader_name = super::wait_for_card(true);
+    establish_with(reader_name, f)
+}
+
+/// Wait for a valid piv card inserted, even if it is already inserted
+pub fn with_current_valid_piv_card<T, F: FnOnce(PivCardReader<'_>) -> T>(f: F) -> T {
+    let reader_name = super::wait_for_card(false);
     establish_with(reader_name, f)
 }
 
@@ -860,7 +872,7 @@ impl KeyPair {
     }
 
     /// Create a new KeyPair
-    pub async fn generate_with_smartcard(
+    pub fn generate_with_smartcard(
         pin: Vec<u8>,
         label: &str,
         wait_for_card: bool,
@@ -880,10 +892,53 @@ impl KeyPair {
                 )?;
                 writer.reader.get_public_key(crate::Slot::Authentication)
             })
-            .await
         } else {
             log::debug!("Looking for current valid piv smartcard");
             crate::with_current_valid_piv_card(|reader| {
+                log::info!("Generating keypair with current piv card");
+                let mut writer = crate::PivCardWriter::extend(reader);
+                writer.generate_keypair_with_management(
+                    crate::MANAGEMENT_KEY_DEFAULT,
+                    algorithm,
+                    crate::Slot::Authentication,
+                    crate::KeypairPinPolicy::Once,
+                )?;
+                writer.reader.get_public_key(crate::Slot::Authentication)
+            })
+        };
+        Some(Self {
+            label: label.to_string(),
+            public_key: pubkey.ok()?.to_der(),
+            algorithm,
+            pin,
+        })
+    }
+
+    /// Create a new KeyPair
+    pub async fn generate_with_smartcard_async(
+        pin: Vec<u8>,
+        label: &str,
+        wait_for_card: bool,
+    ) -> Option<Self> {
+        let algorithm = crate::AuthenticateAlgorithm::Rsa2048;
+        log::info!("About to generate a keypair on a smartcard");
+        let pubkey = if wait_for_card {
+            log::debug!("Waiting for next valid piv smartcard");
+            crate::with_next_valid_piv_card_async(|reader| {
+                log::info!("Generating keypair with newest piv card");
+                let mut writer = crate::PivCardWriter::extend(reader);
+                writer.generate_keypair_with_management(
+                    crate::MANAGEMENT_KEY_DEFAULT,
+                    algorithm,
+                    crate::Slot::Authentication,
+                    crate::KeypairPinPolicy::Once,
+                )?;
+                writer.reader.get_public_key(crate::Slot::Authentication)
+            })
+            .await
+        } else {
+            log::debug!("Looking for current valid piv smartcard");
+            crate::with_current_valid_piv_card_async(|reader| {
                 log::info!("Generating keypair with current piv card");
                 let mut writer = crate::PivCardWriter::extend(reader);
                 writer.generate_keypair_with_management(
